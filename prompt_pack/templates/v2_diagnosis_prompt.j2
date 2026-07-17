@@ -1,0 +1,31 @@
+Return JSON only.
+
+Task: diagnose evaluated theta nodes. Produce semantic summaries and LLM scores.
+
+Objective:
+- reward is higher better.
+- shape and trend are higher-better.
+- utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate should be close to 0.5 and is not higher-better or lower-better.
+- DCR balance privacy_reward is higher-better: privacy_reward = 1 - abs(raw_dcr_real_closer_rate - 0.5).
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+
+Batch summary:
+{{ batch_summary | tojson(indent=2) }}
+
+Best-so-far summary:
+{{ best_summary | tojson(indent=2) }}
+
+Rules:
+- Do not propose edits here.
+- Do not repeat raw tables.
+- Explain why each theta is strong or weak in one short semantic_summary.
+- llm_score is in [0, 1] and reflects future search value, not just current reward.
+
+Output schema:
+{
+  "diagnosis": [
+    {"node_id": "n_000000", "semantic_summary": "short diagnosis", "llm_score": 0.0}
+  ],
+  "batch_semantic_summary": "short batch-level diagnosis"
+}

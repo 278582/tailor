@@ -1,0 +1,367 @@
+{
+  "schema_version": "llm_mcts_dataset_context_v2_compact",
+  "dataset": "magic",
+  "task_type": "binclass",
+  "target_column": "class",
+  "rows": {
+    "train": 17117,
+    "test": 1902,
+    "val": 0
+  },
+  "columns": {
+    "feature": [
+      "Length",
+      "Width",
+      "Size",
+      "Conc",
+      "Conc1",
+      "Asym",
+      "M3Long",
+      "M3Trans",
+      "Alpha",
+      "Dist"
+    ],
+    "num": [
+      "Length",
+      "Width",
+      "Size",
+      "Conc",
+      "Conc1",
+      "Asym",
+      "M3Long",
+      "M3Trans",
+      "Alpha",
+      "Dist"
+    ],
+    "cat": [],
+    "discrete_num": [],
+    "privacy_configured": [
+      "Length",
+      "Width",
+      "Size",
+      "Alpha",
+      "Dist"
+    ],
+    "privacy_domain": [
+      "Conc",
+      "Conc1",
+      "Asym",
+      "M3Long",
+      "M3Trans"
+    ]
+  },
+  "target_summary": {
+    "minority": "h",
+    "utility_notes": [
+      "preserve hadron-background class h coverage; h is the local minority class but is scientifically important for background rejection",
+      "Alpha is the strongest single h-vs-g utility feature in local checks, with Length and Width also highly informative",
+      "M3Long and Asym carry useful signed moment/asymmetry signal and should not be treated as noise",
+      "Conc and Conc1 have weak direct target association but are central to realistic image-shape dependency through Size",
+      "target class must never appear in theta even though it is the label"
+    ]
+  },
+  "theta_guidance": {
+    "shape_priority": [
+      "Alpha",
+      "Length",
+      "Width",
+      "Size",
+      "Dist",
+      "Conc",
+      "Conc1",
+      "Asym",
+      "M3Long",
+      "M3Trans"
+    ],
+    "trend_priority": [
+      "Conc",
+      "Conc1",
+      "Size",
+      "Length",
+      "Width",
+      "Dist",
+      "Asym",
+      "M3Long",
+      "Alpha",
+      "M3Trans"
+    ],
+    "privacy_priority": [
+      "Length",
+      "Width",
+      "Size",
+      "Alpha",
+      "Dist",
+      "Asym",
+      "M3Long",
+      "M3Trans",
+      "Conc",
+      "Conc1"
+    ],
+    "utility_priority": [
+      "Alpha",
+      "Length",
+      "Width",
+      "M3Long",
+      "Asym",
+      "Size",
+      "Dist",
+      "Conc",
+      "M3Trans",
+      "Conc1"
+    ]
+  },
+  "pair_priors": [
+    [
+      "Conc",
+      "Conc1",
+      "two concentration ratios are near-deterministically coupled and must remain coherent"
+    ],
+    [
+      "Size",
+      "Conc",
+      "total image size and concentration ratio are strongly inversely related"
+    ],
+    [
+      "Size",
+      "Conc1",
+      "highest-pixel concentration depends strongly on total image size"
+    ],
+    [
+      "Length",
+      "Width",
+      "major and minor ellipse axes jointly define shower-image geometry"
+    ],
+    [
+      "Width",
+      "Size",
+      "image width scales with total light-yield structure"
+    ],
+    [
+      "Length",
+      "Size",
+      "major-axis length scales with image size and event morphology"
+    ],
+    [
+      "Length",
+      "Dist",
+      "ellipse length and distance from camera origin are moderately dependent"
+    ],
+    [
+      "Length",
+      "Asym",
+      "major-axis extent and longitudinal asymmetry should stay physically plausible together"
+    ],
+    [
+      "Asym",
+      "M3Long",
+      "signed asymmetry and third moment along the major axis describe related longitudinal structure"
+    ],
+    [
+      "Conc",
+      "Dist",
+      "concentration ratio shifts with event distance from origin"
+    ],
+    [
+      "Conc1",
+      "Dist",
+      "single-pixel concentration and event distance should remain coherent"
+    ],
+    [
+      "Alpha",
+      "Dist",
+      "orientation angle and distance jointly affect image placement relative to the source direction"
+    ],
+    [
+      "Width",
+      "Conc",
+      "minor-axis width and concentration ratio are strongly inversely related"
+    ],
+    [
+      "Width",
+      "Conc1",
+      "minor-axis width and highest-pixel concentration should not drift independently"
+    ],
+    [
+      "M3Long",
+      "Alpha",
+      "longitudinal moment and orientation angle both contribute to class-discriminating morphology"
+    ]
+  ],
+  "risks": {
+    "shape": [
+      "all feature columns are continuous; synthetic data can over-smooth high-resolution event signatures",
+      "Length, Width, Size, and Dist are right-tailed, so large event/image-scale values should not be flattened",
+      "Alpha is bounded in [0, 90] and highly nonuniform; it should not be generated outside bounds or washed toward the center",
+      "Conc and Conc1 are bounded ratios with strong coupling; unrealistic ratio values can break image physics",
+      "Asym, M3Long, and M3Trans are signed and heavy-tailed; clipping negative values would distort morphology",
+      "Width can be exactly zero in local train data; do not force all width values strictly positive"
+    ],
+    "trend": [
+      "Conc, Conc1, and Size have the strongest dependency structure and should not be sampled independently",
+      "Length, Width, and Size jointly define ellipse/image scale and must remain coherent",
+      "Asym and M3Long encode related signed longitudinal structure",
+      "Alpha and Dist jointly describe image orientation/placement relative to the camera origin",
+      "weak direct utility variables such as Conc and Conc1 still matter because they anchor realistic dependency structure"
+    ],
+    "privacy": [
+      "configured privacy columns are Length, Width, Size, Alpha, and Dist",
+      "there is no direct human PII, but DCR/privacy risk is still relevant because continuous event descriptors can be near-unique",
+      "combining ellipse geometry, orientation, and signed moment fields can create narrow event-level fingerprints",
+      "col_ps should be broad for the 10-feature schema but must not include all feature columns",
+      "privacy wording should emphasize memorization and nearest-neighbor disclosure rather than demographic privacy"
+    ],
+    "utility": [
+      "dropping Alpha will substantially weaken h-vs-g classification utility",
+      "h is the local minority class and background class; synthetic data should preserve background-like high-Alpha and large-axis patterns",
+      "using only Conc or Conc1 as utility focus is risky because their direct target association is weak despite strong dependency value",
+      "signed morphology features such as M3Long and Asym should remain available for utility even though they have broad tails",
+      "col_u should usually be Alpha, Length, Width, M3Long, or Asym; never use the target column"
+    ]
+  },
+  "seed_theta_examples": [
+    {
+      "family": "fidelity_heavy",
+      "theta": {
+        "col_1ds": [
+          "class",
+          "Alpha",
+          "Length",
+          "Width",
+          "Size",
+          "Dist"
+        ],
+        "col_2ds": [
+          "Length",
+          "Width",
+          "Size",
+          "Alpha",
+          "Dist",
+          "Conc",
+          "Conc1"
+        ],
+        "col_ps": [
+          "Length",
+          "Width",
+          "Size",
+          "Alpha",
+          "Dist",
+          "Asym",
+          "M3Long",
+          "M3Trans"
+        ],
+        "col_u": "Alpha"
+      },
+      "prior_score": 0.8,
+      "reason": "preserves high-risk marginal shapes for orientation, ellipse scale, image size, and distance; col_2ds includes ratio anchors but keeps a geometry-first combination"
+    },
+    {
+      "family": "trend_heavy",
+      "theta": {
+        "col_1ds": [
+          "Conc",
+          "Conc1",
+          "Size",
+          "Length",
+          "Width",
+          "Dist"
+        ],
+        "col_2ds": [
+          "class",
+          "Conc",
+          "Conc1",
+          "Size",
+          "Length",
+          "Width",
+          "Dist",
+          "Asym"
+        ],
+        "col_ps": [
+          "Length",
+          "Width",
+          "Size",
+          "Conc",
+          "Conc1",
+          "Asym",
+          "M3Long",
+          "M3Trans"
+        ],
+        "col_u": "Length"
+      },
+      "prior_score": 0.78,
+      "reason": "concentrates on Conc/Conc1/Size, Length/Width, and signed longitudinal structure; col_ps omits Alpha/Dist so this is not the same event-geometry privacy scope"
+    },
+    {
+      "family": "privacy_aware",
+      "theta": {
+        "col_1ds": [
+          "Length",
+          "Width",
+          "Alpha",
+          "Dist",
+          "Asym",
+          "M3Long"
+        ],
+        "col_2ds": [
+          "Length",
+          "Width",
+          "Size",
+          "Alpha",
+          "Dist",
+          "M3Long",
+          "M3Trans"
+        ],
+        "col_ps": [
+          "Length",
+          "Width",
+          "Size",
+          "Alpha",
+          "Dist",
+          "Conc",
+          "Conc1",
+          "Asym",
+          "M3Long"
+        ],
+        "col_u": "Alpha"
+      },
+      "prior_score": 0.76,
+      "reason": "broad DCR/privacy scope covers configured event-geometry columns plus high-resolution ratio and signed-moment descriptors without using all features"
+    },
+    {
+      "family": "utility_aware",
+      "theta": {
+        "col_1ds": [
+          "class",
+          "Alpha",
+          "Length",
+          "Width",
+          "M3Long",
+          "Asym",
+          "Size"
+        ],
+        "col_2ds": [
+          "class",
+          "Alpha",
+          "Length",
+          "Width",
+          "Size",
+          "Dist",
+          "M3Long",
+          "Asym"
+        ],
+        "col_ps": [
+          "Length",
+          "Width",
+          "Alpha",
+          "Dist",
+          "Conc",
+          "M3Long",
+          "Asym",
+          "M3Trans"
+        ],
+        "col_u": "Alpha"
+      },
+      "prior_score": 0.84,
+      "reason": "uses the strongest h-vs-g utility feature while retaining ellipse geometry, signed morphology, and configured privacy anchors"
+    }
+  ]
+}

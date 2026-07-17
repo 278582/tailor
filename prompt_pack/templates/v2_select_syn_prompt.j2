@@ -1,0 +1,39 @@
+Return JSON only.
+
+Task: select {{ n_pools }} synthetic source pool(s) for adult post-selection.
+Total multiplier per pool must be {{ pool_multiplier }}. Use only listed source_id values.
+
+Goal: maximize final 4-objective reward: shape, trend, DCR balance privacy_reward, utility.
+
+Metric directions:
+- shape and trend are higher-better.
+- utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better.
+- DCR balance privacy_reward is higher-better: privacy_reward = 1 - abs(raw_dcr_real_closer_rate - 0.5).
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+- dcr_real/dcr_test quantiles are nearest-neighbor distances; larger distances reduce exact-neighbor risk, while raw DCR balance should stay near 0.5.
+
+Source brief:
+{{ source_brief | tojson(indent=2) }}
+
+Current search summary:
+{{ search_summary | tojson(indent=2) }}
+
+Rules:
+- Keep output short and machine-parseable.
+- Prefer sources whose semantic_summary complements current weaknesses.
+- Use at least two distinct source_id values in every pool.
+- pool_units multipliers must be positive integers and sum to {{ pool_multiplier }}.
+- Cover different distinct-source counts when possible. If {{ pool_multiplier }} and the listed sources allow it, include or prefer 3-source pools such as 2+1+1 and 4-source pools such as 1+1+1+1 instead of returning only 2-source pools.
+
+Output schema:
+{
+  "syn_pools": [
+    {
+      "pool_units": [{"source_id": "great", "multiplier": 1}, {"source_id": "tabdiff", "multiplier": 3}],
+      "family": "shape|trend|privacy|utility|balanced|diverse",
+      "llm_score": 0.0,
+      "reason": "short semantic reason"
+    }
+  ]
+}

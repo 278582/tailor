@@ -1,0 +1,37 @@
+Return JSON only.
+
+Task: {{ task }}
+
+Theta contract:
+- col_1ds and col_2ds may include target: {{ target_column }}, but target is not required.
+- col_ps MUST NOT include target: {{ target_column }}
+- col_u MUST be one non-target feature.
+- Use only listed columns.
+
+Dataset brief:
+{{ dataset_brief | tojson(indent=2) }}
+
+Search brief:
+{{ search_brief | tojson(indent=2) }}
+
+Rules:
+- Generate exactly {{ n_theta }} proposals.
+- Keep reasons short and semantic.
+- Do not dump all available data back to us.
+- Focus on the weakest objective, but avoid destroying the strongest objective.
+- Metric directions: shape and trend are higher-better.
+- Utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better; DCR balance privacy_reward is higher-better.
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+
+Output schema:
+{
+  "proposals": [
+    {
+      "actions": [],
+      "theta": {"col_1ds": [], "col_2ds": [], "col_ps": [], "col_u": ""},
+      "prior_score": 0.0,
+      "reason": "short semantic reason"
+    }
+  ]
+}

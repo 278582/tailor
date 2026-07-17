@@ -1,0 +1,70 @@
+You are proposing initial StrategyTheta for LLM-guided MCTS in theta-guided Pareto postprocessing of synthetic tabular data.
+
+# Task
+
+Propose {{ n_init }} diverse initial theta proposals for the dataset below. Each proposal includes a jointly produced prior_score and a short reason. prior_score is a PRE-rollout exploration prior, generated from the same rationale that produced the theta.
+
+# Theta contract
+
+  col_1ds : list[str]   1D shape fidelity columns
+  col_2ds : list[str]   2D trend / dependency columns
+  col_ps  : list[str]   privacy / DCR risk columns
+  col_u   : str         exactly one feature column for utility
+
+Use only names from dataset_context.columns.feature, copied verbatim (honor dataset_context.column_name_policy if present). Never use dataset_context.target_column.
+
+# Metric directions
+
+- shape and trend are higher-better.
+- utility metrics: utility_exact_overall/test_score are raw metric values when present (roc_auc higher-better, RMSE lower-better); normalized utility reward fields are higher-better.
+- raw DCR real-closer rate is best near 0.5 and is not higher-better or lower-better; DCR balance privacy_reward is higher-better.
+- Treat raw DCR real-closer rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+
+# Theta size guidance
+
+Feature columns: {{ theta_size_guidance.feature_count }}.
+- col_1ds target: {{ theta_size_guidance.col_1ds.min }}-{{ theta_size_guidance.col_1ds.max }} columns ({{ theta_size_guidance.col_1ds.rule }}).
+- col_2ds target: {{ theta_size_guidance.col_2ds.min }}-{{ theta_size_guidance.col_2ds.max }} anchor columns ({{ theta_size_guidance.col_2ds.rule }}).
+- col_ps target: {{ theta_size_guidance.col_ps.min }}-{{ theta_size_guidance.col_ps.max }} columns ({{ theta_size_guidance.col_ps.rule }}).
+- col_u target: exactly 1 feature column.
+
+Prefer broad col_ps coverage over a tiny privacy scope: include configured privacy columns first, then domain privacy/risk columns when available.
+
+# Dataset context
+
+{{ dataset_context | tojson(indent=2) }}
+
+# Strategy diversity
+
+Across the {{ n_init }} proposals, cover all four families when {{ n_init }} >= 4:
+- fidelity_heavy : col_1ds drawn from theta_guidance.shape_priority, staying within the col_1ds hard range
+- trend_heavy   : col_2ds covers the strongest groups in dataset_context.pair_priors without exceeding the col_2ds hard range
+- privacy_aware : col_ps broad over columns.privacy_configured plus columns.privacy_domain/risk columns, near the upper half of the col_ps hard range
+- utility_aware : col_u is a strong target predictor; col_1ds / col_2ds support it
+
+Pick columns from theta_guidance.{shape,trend,privacy,utility}_priority. Proposals must differ in family or column set; single-column swaps do not count.
+
+{% if existing_theta_keys and (existing_theta_keys | length) > 0 -%}
+# Existing theta keys to avoid
+
+{% for key in existing_theta_keys -%}
+- {{ key }}
+{% endfor %}
+{% endif -%}
+# Joint prior_score
+
+Produce prior_score in [0, 1] together with theta from the same rationale (not as a separate step). Calibration: 0.85-1.00 very strong and dataset-aware; 0.65-0.84 useful; 0.45-0.64 plausible / generic; 0.20-0.44 weak / redundant; 0.00-0.19 invalid.
+
+# Output (JSON only; no prose, no markdown fences)
+
+{
+  "proposals": [
+    {
+      "theta": {"col_1ds": [], "col_2ds": [], "col_ps": [], "col_u": ""},
+      "prior_score": 0.0,
+      "reason": "short rationale tying theta to dataset_context"
+    }
+  ]
+}
+
+Return exactly {{ n_init }} proposals.

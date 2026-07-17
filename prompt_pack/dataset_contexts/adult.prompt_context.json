@@ -1,0 +1,348 @@
+{
+  "schema_version": "llm_mcts_dataset_context_v2_compact",
+  "dataset": "adult",
+  "task_type": "binclass",
+  "target_column": "income",
+  "rows": {
+    "train": 32561,
+    "test": 16281,
+    "val": 0
+  },
+  "columns": {
+    "feature": [
+      "age",
+      "fnlwgt",
+      "education.num",
+      "capital.gain",
+      "capital.loss",
+      "hours.per.week",
+      "workclass",
+      "education",
+      "marital.status",
+      "occupation",
+      "relationship",
+      "race",
+      "sex",
+      "native.country"
+    ],
+    "num": [
+      "age",
+      "fnlwgt",
+      "education.num",
+      "capital.gain",
+      "capital.loss",
+      "hours.per.week"
+    ],
+    "cat": [
+      "workclass",
+      "education",
+      "marital.status",
+      "occupation",
+      "relationship",
+      "race",
+      "sex",
+      "native.country"
+    ],
+    "discrete_num": [
+      "education.num"
+    ],
+    "privacy_configured": [
+      "age",
+      "fnlwgt",
+      "race",
+      "sex",
+      "native.country"
+    ],
+    "privacy_domain": [
+      "marital.status",
+      "relationship"
+    ]
+  },
+  "target_summary": {
+    "minority": ">50K",
+    "utility_notes": [
+      "preserve positive-class (>50K) coverage; precision/recall on the positive class is the key utility signal",
+      "education.num, occupation, capital.gain, and hours.per.week are the strongest income predictors",
+      "married-civ-spouse and exec-managerial / prof-specialty subgroups carry most of the positive mass"
+    ]
+  },
+  "theta_guidance": {
+    "shape_priority": [
+      "age",
+      "education.num",
+      "capital.gain",
+      "hours.per.week",
+      "capital.loss",
+      "workclass",
+      "occupation",
+      "education",
+      "marital.status",
+      "fnlwgt"
+    ],
+    "trend_priority": [
+      "education",
+      "education.num",
+      "marital.status",
+      "relationship",
+      "workclass",
+      "occupation",
+      "age",
+      "hours.per.week"
+    ],
+    "privacy_priority": [
+      "age",
+      "fnlwgt",
+      "race",
+      "sex",
+      "native.country",
+      "marital.status",
+      "relationship"
+    ],
+    "utility_priority": [
+      "education.num",
+      "occupation",
+      "capital.gain",
+      "age",
+      "hours.per.week",
+      "marital.status",
+      "education",
+      "workclass"
+    ]
+  },
+  "pair_priors": [
+    [
+      "education",
+      "education.num",
+      "deterministic ordinal mapping; must stay consistent"
+    ],
+    [
+      "marital.status",
+      "relationship",
+      "high dependency (husband/wife labels tied to marital status)"
+    ],
+    [
+      "workclass",
+      "occupation",
+      "workclass constrains feasible occupations"
+    ],
+    [
+      "age",
+      "hours.per.week",
+      "life-stage shifts the distribution of working hours"
+    ],
+    [
+      "education",
+      "occupation",
+      "education constrains realistic occupation pool"
+    ],
+    [
+      "sex",
+      "relationship",
+      "husband/wife labels are sex-marked"
+    ],
+    [
+      "age",
+      "marital.status",
+      "marital status distribution shifts strongly with age"
+    ],
+    [
+      "capital.gain",
+      "capital.loss",
+      "joint zero / rare-tail pattern dominates shape"
+    ]
+  ],
+  "risks": {
+    "shape": [
+      "capital.gain / capital.loss extreme skew with rare large values that are easy to drop",
+      "native.country dominated by United-States; long thin tail of rare countries",
+      "fnlwgt long-tailed sampling weight"
+    ],
+    "trend": [
+      "education vs education.num must stay consistent (ordinal mirror)",
+      "marital.status vs relationship must stay coherent (husband/wife labels)",
+      "rare workclass-occupation combinations should not be amplified"
+    ],
+    "privacy": [
+      "(age, race, sex, native.country) forms a quasi-identifier; rare native.country values are strong handles",
+      "fnlwgt has near-unique values and acts as a per-row fingerprint",
+      "rare large capital.gain values are quasi-unique and re-identifying when paired with demographics"
+    ],
+    "utility": [
+      "minority (>50K) coverage on married-civ-spouse / exec-managerial subgroups must be preserved",
+      "dropping education.num or occupation from utility scope kills income prediction quality"
+    ]
+  },
+  "seed_theta_examples": [
+    {
+      "family": "fidelity_heavy",
+      "theta": {
+        "col_1ds": [
+          "income",
+          "age",
+          "fnlwgt",
+          "education.num",
+          "capital.gain",
+          "capital.loss",
+          "hours.per.week",
+          "workclass"
+        ],
+        "col_2ds": [
+          "age",
+          "education",
+          "education.num",
+          "capital.gain",
+          "capital.loss",
+          "hours.per.week",
+          "workclass",
+          "occupation"
+        ],
+        "col_ps": [
+          "age",
+          "fnlwgt",
+          "education.num",
+          "capital.gain",
+          "capital.loss",
+          "hours.per.week",
+          "workclass",
+          "education",
+          "occupation",
+          "marital.status",
+          "race",
+          "sex"
+        ],
+        "col_u": "capital.gain"
+      },
+      "prior_score": 0.74,
+      "reason": "shape-heavy seed follows the strongest numeric and marginal-risk evidence: age, fnlwgt, education.num, capital.gain/loss, hours.per.week, and workclass; col_2ds anchors capital tail and workclass-occupation dependencies"
+    },
+    {
+      "family": "trend_heavy",
+      "theta": {
+        "col_1ds": [
+          "education",
+          "education.num",
+          "marital.status",
+          "relationship",
+          "workclass",
+          "occupation",
+          "native.country",
+          "age"
+        ],
+        "col_2ds": [
+          "income",
+          "education",
+          "education.num",
+          "marital.status",
+          "relationship",
+          "workclass",
+          "occupation",
+          "age",
+          "hours.per.week"
+        ],
+        "col_ps": [
+          "age",
+          "fnlwgt",
+          "education.num",
+          "capital.gain",
+          "capital.loss",
+          "hours.per.week",
+          "workclass",
+          "education",
+          "marital.status",
+          "occupation",
+          "relationship",
+          "native.country"
+        ],
+        "col_u": "occupation"
+      },
+      "prior_score": 0.78,
+      "reason": "trend-heavy seed follows the pair priors with education-education.num, marital.status-relationship, workclass-occupation, and age-hours.per.week; race and sex are intentionally left out of col_ps for a distinct privacy scope"
+    },
+    {
+      "family": "privacy_aware",
+      "theta": {
+        "col_1ds": [
+          "age",
+          "fnlwgt",
+          "race",
+          "sex",
+          "native.country",
+          "marital.status",
+          "relationship",
+          "capital.gain"
+        ],
+        "col_2ds": [
+          "age",
+          "fnlwgt",
+          "race",
+          "sex",
+          "native.country",
+          "marital.status",
+          "relationship",
+          "education.num"
+        ],
+        "col_ps": [
+          "age",
+          "fnlwgt",
+          "education.num",
+          "capital.gain",
+          "capital.loss",
+          "hours.per.week",
+          "workclass",
+          "education",
+          "marital.status",
+          "relationship",
+          "race",
+          "sex",
+          "native.country"
+        ],
+        "col_u": "marital.status"
+      },
+      "prior_score": 0.72,
+      "reason": "privacy-aware seed uses the broadest adult col_ps: configured quasi-identifiers, marital.status/relationship, education stratum, and rare capital tails; it still omits occupation so the combination is not a reordered copy of utility seeds"
+    },
+    {
+      "family": "utility_aware",
+      "theta": {
+        "col_1ds": [
+          "income",
+          "marital.status",
+          "relationship",
+          "education.num",
+          "capital.gain",
+          "occupation",
+          "age",
+          "hours.per.week"
+        ],
+        "col_2ds": [
+          "income",
+          "education",
+          "education.num",
+          "occupation",
+          "workclass",
+          "capital.gain",
+          "hours.per.week",
+          "marital.status",
+          "relationship"
+        ],
+        "col_ps": [
+          "age",
+          "education.num",
+          "capital.gain",
+          "capital.loss",
+          "hours.per.week",
+          "workclass",
+          "education",
+          "marital.status",
+          "occupation",
+          "relationship",
+          "race",
+          "sex"
+        ],
+        "col_u": "education.num"
+      },
+      "prior_score": 0.8,
+      "reason": "utility-aware seed follows real target signal and context guidance: marital.status/relationship, capital.gain, education.num, occupation, age, and hours.per.week dominate income prediction while col_ps omits fnlwgt/native.country to differ from the privacy seed"
+    }
+  ]
+}

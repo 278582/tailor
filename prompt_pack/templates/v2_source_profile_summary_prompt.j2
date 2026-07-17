@@ -1,0 +1,34 @@
+Return JSON only.
+
+Task: summarize one synthetic source profile for LLM-MCTS source selection.
+
+Dataset brief:
+{{ dataset_brief | tojson(indent=2) }}
+
+DCR balance semantics:
+{{ dcr_balance_semantics | tojson(indent=2) }}
+
+Source profile from repeated complete evaluations:
+{{ source_profile | tojson(indent=2) }}
+
+Rules:
+- Do not repeat raw numbers mechanically.
+- Explain the source's practical strength, weakness, and best use.
+- Metric directions: shape and trend are higher-better.
+- Utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better.
+- DCR balance privacy_reward is higher-better: privacy_reward = 1 - abs(raw_dcr_real_closer_rate - 0.5).
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+- dcr_real/dcr_test quantiles are nearest-neighbor distances; larger distances reduce exact-neighbor risk, while raw DCR balance should stay near 0.5.
+- Focus on shape worst columns, trend worst pairs, DCR balance/distance diagnostics, and utility feature importance.
+- Keep every text field short.
+
+Output schema:
+{
+  "schema_version": "v2_source_profile_summary_v1",
+  "source_id": "{{ source_profile.source_id }}",
+  "semantic_summary": "one compact diagnosis",
+  "strengths": ["short strength"],
+  "weaknesses": ["short weakness"],
+  "best_use": "shape|trend|privacy|utility|balanced|diverse"
+}

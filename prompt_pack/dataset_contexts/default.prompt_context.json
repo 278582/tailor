@@ -1,0 +1,552 @@
+{
+  "schema_version": "llm_mcts_dataset_context_v2_compact",
+  "dataset": "default",
+  "task_type": "binclass",
+  "target_column": "default payment next month",
+  "rows": {
+    "train": 27000,
+    "test": 3000,
+    "val": 0
+  },
+  "columns": {
+    "feature": [
+      "LIMIT_BAL",
+      "SEX",
+      "EDUCATION",
+      "MARRIAGE",
+      "AGE",
+      "PAY_0",
+      "PAY_2",
+      "PAY_3",
+      "PAY_4",
+      "PAY_5",
+      "PAY_6",
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_AMT5",
+      "PAY_AMT6"
+    ],
+    "num": [
+      "LIMIT_BAL",
+      "AGE",
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_AMT5",
+      "PAY_AMT6"
+    ],
+    "cat": [
+      "SEX",
+      "EDUCATION",
+      "MARRIAGE",
+      "PAY_0",
+      "PAY_2",
+      "PAY_3",
+      "PAY_4",
+      "PAY_5",
+      "PAY_6"
+    ],
+    "discrete_num": [],
+    "privacy_configured": [
+      "LIMIT_BAL",
+      "SEX",
+      "EDUCATION",
+      "MARRIAGE",
+      "AGE"
+    ],
+    "privacy_domain": [
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_AMT5",
+      "PAY_AMT6",
+      "PAY_0",
+      "PAY_2",
+      "PAY_3"
+    ]
+  },
+  "target_summary": {
+    "minority": "1",
+    "utility_notes": [
+      "preserve positive-class default=1 coverage; classification utility depends on not washing out the minority default class",
+      "PAY_0 through PAY_6 are the strongest default-risk indicators, with PAY_0 the most important recent repayment-status signal",
+      "LIMIT_BAL and recent payment amounts such as PAY_AMT1/PAY_AMT2 carry important inverse risk signal",
+      "BILL_AMT1 through BILL_AMT6 are highly dependent monthly bill-amount sequence features and should support realistic credit-utilization structure",
+      "target default payment next month must never appear in theta even though it is the label"
+    ]
+  },
+  "theta_guidance": {
+    "shape_priority": [
+      "LIMIT_BAL",
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_0",
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_AMT5",
+      "PAY_AMT6",
+      "PAY_2",
+      "PAY_3",
+      "PAY_4",
+      "PAY_5",
+      "PAY_6",
+      "AGE",
+      "EDUCATION",
+      "MARRIAGE",
+      "SEX"
+    ],
+    "trend_priority": [
+      "PAY_0",
+      "PAY_2",
+      "PAY_3",
+      "PAY_4",
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "PAY_5",
+      "PAY_6",
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_AMT5",
+      "PAY_AMT6",
+      "LIMIT_BAL",
+      "AGE",
+      "MARRIAGE",
+      "EDUCATION",
+      "SEX"
+    ],
+    "privacy_priority": [
+      "LIMIT_BAL",
+      "SEX",
+      "EDUCATION",
+      "MARRIAGE",
+      "AGE",
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_0",
+      "PAY_2",
+      "PAY_3",
+      "PAY_4",
+      "PAY_5",
+      "PAY_6"
+    ],
+    "utility_priority": [
+      "PAY_0",
+      "PAY_2",
+      "PAY_3",
+      "PAY_4",
+      "PAY_5",
+      "PAY_6",
+      "LIMIT_BAL",
+      "PAY_AMT1",
+      "PAY_AMT2",
+      "PAY_AMT3",
+      "PAY_AMT4",
+      "PAY_AMT5",
+      "PAY_AMT6",
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "AGE",
+      "EDUCATION",
+      "MARRIAGE",
+      "SEX"
+    ]
+  },
+  "pair_priors": [
+    [
+      "PAY_0",
+      "PAY_2",
+      "recent and prior repayment status form the strongest default-risk trajectory"
+    ],
+    [
+      "PAY_2",
+      "PAY_3",
+      "repayment status is serially dependent across adjacent billing months"
+    ],
+    [
+      "PAY_3",
+      "PAY_4",
+      "delinquency status should evolve coherently over the monthly sequence"
+    ],
+    [
+      "BILL_AMT1",
+      "BILL_AMT2",
+      "monthly bill amounts are highly autocorrelated and anchor account balance continuity"
+    ],
+    [
+      "BILL_AMT5",
+      "BILL_AMT6",
+      "late-sequence bill amounts have very strong adjacent-month dependence"
+    ],
+    [
+      "LIMIT_BAL",
+      "BILL_AMT1",
+      "credit limit constrains bill scale and utilization patterns"
+    ],
+    [
+      "PAY_4",
+      "PAY_5",
+      "repayment status remains strongly serially dependent later in the sequence"
+    ],
+    [
+      "PAY_5",
+      "PAY_6",
+      "last two repayment-status months should remain coherent"
+    ],
+    [
+      "BILL_AMT2",
+      "BILL_AMT3",
+      "bill amount sequence has strong adjacent-month continuity"
+    ],
+    [
+      "BILL_AMT3",
+      "BILL_AMT4",
+      "middle-month bill balances should not drift independently"
+    ],
+    [
+      "BILL_AMT4",
+      "BILL_AMT5",
+      "bill amount autocorrelation remains high across later months"
+    ],
+    [
+      "BILL_AMT1",
+      "PAY_AMT1",
+      "payment amount should be plausible relative to current bill amount"
+    ],
+    [
+      "BILL_AMT2",
+      "PAY_AMT2",
+      "monthly payment should remain aligned with corresponding bill amount"
+    ],
+    [
+      "LIMIT_BAL",
+      "PAY_0",
+      "lower credit limits and repayment status jointly describe default-risk strata"
+    ],
+    [
+      "AGE",
+      "MARRIAGE",
+      "age and marital status are demographic fields with strong dependency"
+    ],
+    [
+      "EDUCATION",
+      "LIMIT_BAL",
+      "education group is associated with credit-limit distribution"
+    ],
+    [
+      "PAY_0",
+      "PAY_AMT1",
+      "recent delinquency and recent payment amount jointly affect utility signal"
+    ]
+  ],
+  "risks": {
+    "shape": [
+      "monetary columns are right-tailed; synthetic data can flatten large BILL_AMT* and PAY_AMT* extremes",
+      "PAY_AMT1 through PAY_AMT6 are zero-inflated and nonnegative; zero mass and long tails both matter",
+      "BILL_AMT1 through BILL_AMT6 can be negative and zero-heavy; clipping all negatives to zero would distort shape",
+      "repayment-status columns contain rare high-delay categories such as 5-8; rare categories should not be dropped or amplified",
+      "EDUCATION and MARRIAGE contain rare coded values including 0, and these should stay plausible"
+    ],
+    "trend": [
+      "BILL_AMT1 through BILL_AMT6 are highly autocorrelated monthly balances and should not be sampled independently",
+      "PAY_0 through PAY_6 form an ordered repayment-status trajectory with strong adjacent-month dependence",
+      "payment amounts should remain plausible relative to bill amounts and repayment status",
+      "LIMIT_BAL constrains bill scale, payment behavior, and utilization patterns",
+      "demographic dependencies such as AGE with MARRIAGE should remain coherent without dominating utility"
+    ],
+    "privacy": [
+      "configured privacy columns are LIMIT_BAL, SEX, EDUCATION, MARRIAGE, and AGE",
+      "LIMIT_BAL plus demographics can create narrow strata, especially when combined with exact bill/payment amounts",
+      "high-resolution BILL_AMT* and PAY_AMT* values can act as quasi-identifiers",
+      "repayment-status trajectories across six months can identify unusual delinquency patterns",
+      "current code-derived bounds require broad col_ps for 23 features, but col_ps must not include all feature columns"
+    ],
+    "utility": [
+      "dropping PAY_0 or later PAY_* status columns will substantially weaken default classification utility",
+      "class 1 is the minority default class at about 22%; synthetic data should preserve positive-class coverage",
+      "using only demographics as utility focus is too weak and risks learning proxy demographics instead of repayment behavior",
+      "bill amounts alone have weaker direct target association than repayment status and credit/payment behavior",
+      "col_u should usually be PAY_0, PAY_2, LIMIT_BAL, or a recent payment amount such as PAY_AMT1"
+    ]
+  },
+  "seed_theta_examples": [
+    {
+      "family": "fidelity_heavy",
+      "theta": {
+        "col_1ds": [
+          "default payment next month",
+          "LIMIT_BAL",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "BILL_AMT5",
+          "BILL_AMT6",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_AMT3",
+          "PAY_0",
+          "AGE"
+        ],
+        "col_2ds": [
+          "LIMIT_BAL",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_0",
+          "PAY_2",
+          "AGE",
+          "MARRIAGE",
+          "BILL_AMT5"
+        ],
+        "col_ps": [
+          "LIMIT_BAL",
+          "SEX",
+          "EDUCATION",
+          "MARRIAGE",
+          "AGE",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "BILL_AMT5",
+          "BILL_AMT6",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_AMT3",
+          "PAY_AMT4"
+        ],
+        "col_u": "LIMIT_BAL"
+      },
+      "prior_score": 0.76,
+      "reason": "fidelity seed follows shape risks for LIMIT_BAL, BILL_AMT1-6, PAY_AMT1-3, recent repayment status, and AGE; col_ps omits late repayment status and late payment amounts rather than copying other seeds"
+    },
+    {
+      "family": "trend_heavy",
+      "theta": {
+        "col_1ds": [
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "LIMIT_BAL",
+          "PAY_AMT1"
+        ],
+        "col_2ds": [
+          "default payment next month",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "BILL_AMT5",
+          "BILL_AMT6",
+          "LIMIT_BAL",
+          "PAY_AMT1"
+        ],
+        "col_ps": [
+          "LIMIT_BAL",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "BILL_AMT5",
+          "BILL_AMT6",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_AMT3",
+          "PAY_AMT4",
+          "PAY_AMT5",
+          "PAY_AMT6"
+        ],
+        "col_u": "PAY_0"
+      },
+      "prior_score": 0.82,
+      "reason": "trend seed follows the repayment-status trajectory and adjacent bill-balance priors; its privacy scope deliberately emphasizes monetary/time-series quasi-identifiers and omits demographic columns"
+    },
+    {
+      "family": "privacy_aware",
+      "theta": {
+        "col_1ds": [
+          "LIMIT_BAL",
+          "SEX",
+          "EDUCATION",
+          "MARRIAGE",
+          "AGE",
+          "BILL_AMT1",
+          "BILL_AMT6",
+          "PAY_AMT1",
+          "PAY_AMT6",
+          "PAY_0",
+          "PAY_2",
+          "BILL_AMT2"
+        ],
+        "col_2ds": [
+          "LIMIT_BAL",
+          "SEX",
+          "EDUCATION",
+          "MARRIAGE",
+          "AGE",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "PAY_AMT1",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4"
+        ],
+        "col_ps": [
+          "LIMIT_BAL",
+          "SEX",
+          "EDUCATION",
+          "MARRIAGE",
+          "AGE",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "BILL_AMT3",
+          "BILL_AMT4",
+          "BILL_AMT5",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_AMT3",
+          "PAY_AMT4",
+          "PAY_AMT5",
+          "PAY_AMT6"
+        ],
+        "col_u": "LIMIT_BAL"
+      },
+      "prior_score": 0.74,
+      "reason": "privacy seed uses the broadest default col_ps: configured demographic/credit columns, repayment trajectory, early-to-late bill amounts, and payment amounts; it still omits BILL_AMT6 so it is broad without becoming full-feature privacy"
+    },
+    {
+      "family": "utility_aware",
+      "theta": {
+        "col_1ds": [
+          "default payment next month",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "LIMIT_BAL",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_AMT3",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "AGE"
+        ],
+        "col_2ds": [
+          "default payment next month",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "LIMIT_BAL",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "BILL_AMT1",
+          "BILL_AMT2"
+        ],
+        "col_ps": [
+          "LIMIT_BAL",
+          "SEX",
+          "EDUCATION",
+          "MARRIAGE",
+          "AGE",
+          "PAY_0",
+          "PAY_2",
+          "PAY_3",
+          "PAY_4",
+          "PAY_5",
+          "PAY_6",
+          "BILL_AMT1",
+          "BILL_AMT2",
+          "PAY_AMT1",
+          "PAY_AMT2",
+          "PAY_AMT3",
+          "PAY_AMT4",
+          "PAY_AMT5",
+          "PAY_AMT6"
+        ],
+        "col_u": "PAY_0"
+      },
+      "prior_score": 0.84,
+      "reason": "utility seed follows the real target signal: PAY_0, PAY_2-6, LIMIT_BAL, and recent payment amounts dominate default prediction; col_ps omits later bill balances rather than reusing the fidelity/privacy combination"
+    }
+  ]
+}

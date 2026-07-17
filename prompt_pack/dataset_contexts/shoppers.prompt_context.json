@@ -1,0 +1,470 @@
+{
+  "schema_version": "llm_mcts_dataset_context_v2_compact",
+  "dataset": "shoppers",
+  "task_type": "binclass",
+  "target_column": "Revenue",
+  "rows": {
+    "train": 11097,
+    "test": 1233,
+    "val": 0
+  },
+  "columns": {
+    "feature": [
+      "Administrative",
+      "Administrative_Duration",
+      "Informational",
+      "Informational_Duration",
+      "ProductRelated",
+      "ProductRelated_Duration",
+      "BounceRates",
+      "ExitRates",
+      "PageValues",
+      "SpecialDay",
+      "Month",
+      "OperatingSystems",
+      "Browser",
+      "Region",
+      "TrafficType",
+      "VisitorType",
+      "Weekend"
+    ],
+    "num": [
+      "Administrative",
+      "Administrative_Duration",
+      "Informational",
+      "Informational_Duration",
+      "ProductRelated",
+      "ProductRelated_Duration",
+      "BounceRates",
+      "ExitRates",
+      "PageValues",
+      "SpecialDay"
+    ],
+    "cat": [
+      "Month",
+      "OperatingSystems",
+      "Browser",
+      "Region",
+      "TrafficType",
+      "VisitorType",
+      "Weekend"
+    ],
+    "discrete_num": [
+      "Administrative",
+      "Informational",
+      "ProductRelated"
+    ],
+    "privacy_configured": [
+      "Administrative",
+      "Administrative_Duration",
+      "Informational",
+      "Informational_Duration",
+      "ProductRelated"
+    ],
+    "privacy_domain": [
+      "ProductRelated_Duration",
+      "BounceRates",
+      "ExitRates",
+      "PageValues",
+      "Month",
+      "TrafficType",
+      "VisitorType",
+      "OperatingSystems",
+      "Browser",
+      "Region",
+      "Weekend"
+    ]
+  },
+  "target_summary": {
+    "minority": "True",
+    "utility_notes": [
+      "preserve positive-class Revenue=True coverage; purchase sessions are the minority class and are the key utility signal",
+      "PageValues is the strongest local purchase predictor and should be prioritized for utility and shape fidelity",
+      "ExitRates and BounceRates are important negative purchase indicators and must remain bounded and mutually coherent",
+      "ProductRelated and ProductRelated_Duration capture product-browsing depth and are important positive utility and trend anchors",
+      "Month, VisitorType, TrafficType, and Weekend carry session-context signal, but target Revenue must never appear in theta"
+    ]
+  },
+  "theta_guidance": {
+    "shape_priority": [
+      "PageValues",
+      "ProductRelated_Duration",
+      "ProductRelated",
+      "BounceRates",
+      "ExitRates",
+      "Administrative_Duration",
+      "Administrative",
+      "Informational_Duration",
+      "Informational",
+      "SpecialDay",
+      "Month",
+      "TrafficType",
+      "VisitorType",
+      "Weekend",
+      "OperatingSystems",
+      "Browser",
+      "Region"
+    ],
+    "trend_priority": [
+      "BounceRates",
+      "ExitRates",
+      "ProductRelated",
+      "ProductRelated_Duration",
+      "Administrative",
+      "Administrative_Duration",
+      "Informational",
+      "Informational_Duration",
+      "PageValues",
+      "Month",
+      "VisitorType",
+      "TrafficType",
+      "Weekend",
+      "SpecialDay",
+      "OperatingSystems",
+      "Browser",
+      "Region"
+    ],
+    "privacy_priority": [
+      "Administrative",
+      "Administrative_Duration",
+      "Informational",
+      "Informational_Duration",
+      "ProductRelated",
+      "ProductRelated_Duration",
+      "PageValues",
+      "BounceRates",
+      "ExitRates",
+      "Month",
+      "TrafficType",
+      "VisitorType",
+      "OperatingSystems",
+      "Browser",
+      "Region",
+      "Weekend"
+    ],
+    "utility_priority": [
+      "PageValues",
+      "ExitRates",
+      "ProductRelated",
+      "BounceRates",
+      "ProductRelated_Duration",
+      "Administrative",
+      "VisitorType",
+      "Month",
+      "TrafficType",
+      "Administrative_Duration",
+      "Informational",
+      "SpecialDay",
+      "Weekend",
+      "Informational_Duration",
+      "OperatingSystems",
+      "Browser",
+      "Region"
+    ]
+  },
+  "pair_priors": [
+    [
+      "BounceRates",
+      "ExitRates",
+      "bounce and exit rates are extremely strongly coupled bounded session-quality rates"
+    ],
+    [
+      "ProductRelated",
+      "ProductRelated_Duration",
+      "product page count and product-page duration jointly describe browsing depth"
+    ],
+    [
+      "Informational",
+      "Informational_Duration",
+      "informational page count and duration should stay coherent despite high zero mass"
+    ],
+    [
+      "Administrative",
+      "Administrative_Duration",
+      "administrative page count and duration form a count-duration pair"
+    ],
+    [
+      "Administrative",
+      "ProductRelated",
+      "sessions with more administrative interactions often also have deeper product browsing"
+    ],
+    [
+      "ProductRelated",
+      "ExitRates",
+      "product browsing depth and exit behavior are inversely related and utility-relevant"
+    ],
+    [
+      "ProductRelated",
+      "BounceRates",
+      "deeper product browsing generally corresponds to lower bounce behavior"
+    ],
+    [
+      "ProductRelated_Duration",
+      "ExitRates",
+      "longer product engagement should remain coherent with lower exit rates"
+    ],
+    [
+      "PageValues",
+      "ExitRates",
+      "high page value sessions usually have lower exit-rate patterns and stronger purchase signal"
+    ],
+    [
+      "PageValues",
+      "ProductRelated",
+      "page value is tied to product-browsing depth and purchase likelihood"
+    ],
+    [
+      "Month",
+      "SpecialDay",
+      "seasonality and proximity to special shopping days should remain coherent"
+    ],
+    [
+      "Month",
+      "VisitorType",
+      "visitor mix shifts by month and affects purchase-rate structure"
+    ],
+    [
+      "TrafficType",
+      "VisitorType",
+      "acquisition channel and visitor type jointly describe session source"
+    ],
+    [
+      "OperatingSystems",
+      "Browser",
+      "device and browser categories are related technical-session descriptors"
+    ],
+    [
+      "Region",
+      "TrafficType",
+      "region and traffic source can form rare session-context combinations"
+    ],
+    [
+      "Weekend",
+      "VisitorType",
+      "weekend sessions have a different visitor/purchase mix"
+    ]
+  ],
+  "risks": {
+    "shape": [
+      "PageValues, duration columns, and product page counts are right-tailed; synthetic data can flatten high-value or long-session tails",
+      "PageValues, Informational, Informational_Duration, SpecialDay, and administrative fields are strongly zero-inflated; zero mass must be preserved",
+      "BounceRates and ExitRates are bounded rates in [0, 0.2]; values outside bounds or flattened central mass would distort shape",
+      "count-like columns Administrative, Informational, and ProductRelated should remain nonnegative and integer-like",
+      "rare categorical values in Browser, TrafficType, and OperatingSystems should not be dropped or amplified"
+    ],
+    "trend": [
+      "count-duration pairs must stay coherent: administrative, informational, and product-related page counts should align with their duration fields",
+      "BounceRates and ExitRates are the strongest pair dependency and should not be sampled independently",
+      "product-browsing depth should remain coherent with lower bounce/exit behavior and higher page values",
+      "Month and SpecialDay encode seasonal shopping context and should remain plausible together",
+      "acquisition/session context such as TrafficType, VisitorType, Weekend, browser, and region should not create impossible rare combinations"
+    ],
+    "privacy": [
+      "configured privacy columns are Administrative, Administrative_Duration, Informational, Informational_Duration, and ProductRelated",
+      "there is no direct human PII, but session behavior can be near-unique when count, duration, device, traffic, region, and timing context are combined",
+      "high-resolution duration and value fields can act as session fingerprints",
+      "rare TrafficType, Browser, and OperatingSystems categories can become strong nearest-neighbor handles",
+      "current code-derived bounds require broad col_ps for 17 features, but col_ps must not include all feature columns"
+    ],
+    "utility": [
+      "dropping PageValues will substantially weaken purchase classification utility",
+      "Revenue=True is the minority class at about 15.6%; synthetic data should preserve positive purchase-session coverage",
+      "using only device/browser/region categories as utility focus is too weak and can miss behavioral purchase signal",
+      "high BounceRates/ExitRates are negative purchase signals; preserving their inverse relation with purchase-like sessions matters",
+      "col_u should usually be PageValues, ExitRates, ProductRelated, BounceRates, or ProductRelated_Duration; never use the target column"
+    ]
+  },
+  "seed_theta_examples": [
+    {
+      "family": "fidelity_heavy",
+      "theta": {
+        "col_1ds": [
+          "Revenue",
+          "PageValues",
+          "ProductRelated_Duration",
+          "ProductRelated",
+          "BounceRates",
+          "ExitRates",
+          "Administrative_Duration",
+          "Administrative",
+          "SpecialDay",
+          "Month"
+        ],
+        "col_2ds": [
+          "BounceRates",
+          "ExitRates",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "Administrative",
+          "Administrative_Duration",
+          "PageValues",
+          "Month",
+          "SpecialDay"
+        ],
+        "col_ps": [
+          "Administrative",
+          "Administrative_Duration",
+          "Informational",
+          "Informational_Duration",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "PageValues",
+          "BounceRates",
+          "ExitRates",
+          "SpecialDay",
+          "Month",
+          "TrafficType",
+          "VisitorType",
+          "Weekend"
+        ],
+        "col_u": "PageValues"
+      },
+      "prior_score": 0.8,
+      "reason": "preserves high-risk marginal shapes for page values, product browsing depth, bounded rates, zero-inflated special-day behavior, and configured session-behavior privacy columns while omitting device/browser/region from this privacy scope"
+    },
+    {
+      "family": "trend_heavy",
+      "theta": {
+        "col_1ds": [
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "BounceRates",
+          "ExitRates",
+          "PageValues",
+          "Month",
+          "Administrative_Duration",
+          "Administrative",
+          "Informational"
+        ],
+        "col_2ds": [
+          "Revenue",
+          "BounceRates",
+          "ExitRates",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "Administrative",
+          "Administrative_Duration",
+          "Informational",
+          "Informational_Duration",
+          "PageValues",
+          "Month"
+        ],
+        "col_ps": [
+          "Administrative",
+          "Administrative_Duration",
+          "Informational",
+          "Informational_Duration",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "BounceRates",
+          "ExitRates",
+          "PageValues",
+          "Month",
+          "TrafficType",
+          "VisitorType",
+          "OperatingSystems",
+          "SpecialDay"
+        ],
+        "col_u": "ProductRelated"
+      },
+      "prior_score": 0.78,
+      "reason": "focuses col_2ds on rate, count-duration, product-depth, and seasonal dependency groups; col_ps omits browser/region/weekend instead of copying the fidelity scope"
+    },
+    {
+      "family": "privacy_aware",
+      "theta": {
+        "col_1ds": [
+          "Administrative",
+          "Administrative_Duration",
+          "Informational",
+          "Informational_Duration",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "PageValues",
+          "TrafficType",
+          "VisitorType"
+        ],
+        "col_2ds": [
+          "Administrative",
+          "Administrative_Duration",
+          "Informational",
+          "Informational_Duration",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "TrafficType",
+          "VisitorType",
+          "Region"
+        ],
+        "col_ps": [
+          "Administrative",
+          "Administrative_Duration",
+          "Informational",
+          "Informational_Duration",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "PageValues",
+          "BounceRates",
+          "ExitRates",
+          "Month",
+          "TrafficType",
+          "VisitorType",
+          "OperatingSystems",
+          "Browser",
+          "Region",
+          "Weekend"
+        ],
+        "col_u": "PageValues"
+      },
+      "prior_score": 0.76,
+      "reason": "broad DCR/privacy scope covers configured behavior columns plus value, rate, traffic, device, browser, and region fingerprints without using all features"
+    },
+    {
+      "family": "utility_aware",
+      "theta": {
+        "col_1ds": [
+          "Revenue",
+          "PageValues",
+          "ExitRates",
+          "BounceRates",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "Administrative",
+          "VisitorType",
+          "Month",
+          "TrafficType"
+        ],
+        "col_2ds": [
+          "Revenue",
+          "PageValues",
+          "ExitRates",
+          "BounceRates",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "Month",
+          "VisitorType",
+          "TrafficType",
+          "Weekend"
+        ],
+        "col_ps": [
+          "Administrative",
+          "Administrative_Duration",
+          "ProductRelated",
+          "ProductRelated_Duration",
+          "PageValues",
+          "BounceRates",
+          "ExitRates",
+          "Month",
+          "SpecialDay",
+          "VisitorType",
+          "TrafficType",
+          "Browser",
+          "Region",
+          "Weekend"
+        ],
+        "col_u": "PageValues"
+      },
+      "prior_score": 0.84,
+      "reason": "uses the strongest purchase utility signal while retaining negative rate indicators, product browsing, season/traffic/visitor context, and a different privacy scope that omits informational/device fields"
+    }
+  ]
+}
