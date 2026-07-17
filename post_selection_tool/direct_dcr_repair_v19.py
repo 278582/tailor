@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pandas as pd
+
+from .direct_dcr_repair_v15 import apply_direct_dcr_repair_v15
+
+
+def apply_direct_dcr_repair_v19(
+    *,
+    pool_records: list[dict[str, Any]],
+    selected_records: list[dict[str, Any]],
+    exact_records: list[dict[str, Any]],
+    surrogate_records: list[dict[str, Any]] | None,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    schema_card: dict[str, Any],
+    column_order: list[str],
+    target_margin: float = 0.03,
+    max_swap_fraction: float = 0.30,
+    candidate_neighbors: int = 64,
+    margin_weight: float = 0.10,
+    utility_weight: float = 0.65,
+    cat_weight: float = 1.0,
+    large_keep_k_threshold: int = 50_000,
+    large_pool_rows_threshold: int = 180_000,
+    large_candidate_rows: int = 72_000,
+    large_reference_rows: int = 0,
+    large_max_swaps: int = 20_000,
+    large_candidate_neighbors: int = 28,
+    min_pair_utility_gain: float = -0.08,
+    fallback_min_pair_utility_gain: float = -0.18,
+    signal_query_batch_size: int = 0,
+    signal_reference_chunk_size: int = 65536,
+    signal_device: str = "auto",
+    report_id_limit: int = 64,
+    target_bins: int = 12,
+    quality_weight: float = 0.20,
+    target_mismatch_penalty: float = 4.0,
+    generic_remove_budget: int = 20_000,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
+    final_df, final_records, report = apply_direct_dcr_repair_v15(
+        pool_records=pool_records,
+        selected_records=selected_records,
+        exact_records=exact_records,
+        surrogate_records=surrogate_records,
+        train_df=train_df,
+        test_df=test_df,
+        schema_card=schema_card,
+        column_order=column_order,
+        target_margin=target_margin,
+        max_swap_fraction=max_swap_fraction,
+        candidate_neighbors=candidate_neighbors,
+        margin_weight=margin_weight,
+        utility_weight=utility_weight,
+        cat_weight=cat_weight,
+        large_keep_k_threshold=large_keep_k_threshold,
+        large_pool_rows_threshold=large_pool_rows_threshold,
+        large_candidate_rows=large_candidate_rows,
+        large_reference_rows=large_reference_rows,
+        large_max_swaps=large_max_swaps,
+        large_candidate_neighbors=large_candidate_neighbors,
+        min_pair_utility_gain=min_pair_utility_gain,
+        fallback_min_pair_utility_gain=fallback_min_pair_utility_gain,
+        signal_query_batch_size=signal_query_batch_size,
+        signal_reference_chunk_size=signal_reference_chunk_size,
+        signal_device=signal_device,
+        report_id_limit=report_id_limit,
+        target_bins=target_bins,
+        quality_weight=quality_weight,
+        target_mismatch_penalty=target_mismatch_penalty,
+        generic_remove_budget=generic_remove_budget,
+    )
+    return final_df, final_records, {
+        **report,
+        "version": "direct_dcr_repair_v19",
+        "selection_signal": "configured_signal_columns_l1_dcr_center_target_duplicate_fill",
+        "base_strategy": "configured_signal_columns_center_target_duplicate_fill_v19",
+        "v19_source_strategy": "direct_dcr_repair_v15",
+        "v19_center_target_margin": float(target_margin),
+    }
