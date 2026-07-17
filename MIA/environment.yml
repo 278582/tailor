@@ -1,0 +1,16 @@
+name: MIA
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - joblib
+  - tqdm
+  - xgboost
+  - pytest
+  - matplotlib
+  - seaborn
