@@ -42,7 +42,7 @@ does not modify source CSV files, but prevents values such as `" Male"` and
 Change `--model`, `--exp`, and `--data`:
 
 ```bash
-/mnt/lustre/liuzhiwei/miniconda3/bin/conda run -n tgm_pr python Precison-Recall/alpha_beta_pr.py \
+/*/miniconda3/bin/conda run -n tgm_pr python Precison-Recall/alpha_beta_pr.py \
   --datasets shoppers news adult default diabetes magic beijing \
   --model MODEL \
   --exp EXP \
