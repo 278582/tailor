@@ -1,0 +1,13 @@
+numpy<2
+pandas
+scipy
+scikit-learn
+torch>=2.0
+tqdm
+jinja2
+sdmetrics
+xgboost
+prdc
+plotly
+pillow
+pytest

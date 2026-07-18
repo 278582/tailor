@@ -1,0 +1,21 @@
+name: tgm-main
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.10
+  - pip
+  - numpy<2
+  - pandas
+  - scipy
+  - scikit-learn
+  - pytorch>=2.0
+  - tqdm
+  - pip:
+      - jinja2
+      - sdmetrics
+      - xgboost
+      - prdc
+      - plotly
+      - pillow
+      - pytest
