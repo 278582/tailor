@@ -741,7 +741,7 @@ def run_csv_smoke(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke test torch_lightweight_mlp evaluator and prompt restoration.")
-    parser.add_argument("--csv", default="/mnt/lustre/liuzhiwei/cpx/cpj/TGM/selection_pareto.csv")
+    parser.add_argument("--csv", default="/*/selection_pareto.csv")
     parser.add_argument("--target-column", default="income")
     parser.add_argument("--dataset-name", default="adult")
     parser.add_argument("--device", default="cuda:0")
