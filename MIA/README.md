@@ -38,21 +38,21 @@ Audit all selections in a postprocess run:
 ```bash
 /*/miniconda3/bin/conda run -n MIA \
   python -m MIA.cli \
-  --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
+  --run-dir [input dir] \
   --all-selections \
-  --out-dir MIA/results/news_no_theta_1_2
+  --out-dir [output dir]
 ```
 
 For quick scans on large tables, add row caps such as:
 
 ```bash
 python -m MIA.cli \
-  --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
-  --selection-name pareto \
+  --run-dir [input dir] \
+  --selection-name [method] \
   --max-member-rows 5000 \
   --max-nonmember-rows 5000 \
   --max-synthetic-rows 5000 \
-  --out-dir MIA/results/news_quick_pareto
+  --out-dir MIA/results/[dir]
 ```
 
 Audit one explicit synthetic CSV:
@@ -62,7 +62,7 @@ python -m MIA.cli \
   --train-csv path/to/eval_train.csv \
   --control-csv path/to/eval_holdout.csv \
   --reference-csv path/to/eval_test.csv \
-  --synthetic-csv path/to/selection_pareto.csv \
+  --synthetic-csv path/to/selection_[method].csv \
   --out-dir MIA/results/example
 ```
 
@@ -70,11 +70,11 @@ Add shadow runs when available:
 
 ```bash
 python -m MIA.cli \
-  --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
-  --selection-name pareto \
-  --shadow-run-dir artifacts/postprocess/tabsyn/news/no_theta_0_1 \
-  --shadow-run-dir artifacts/postprocess/tabsyn/news/no_theta_3_1 \
-  --out-dir MIA/results/news_shadow_pareto
+  --run-dir [input dir] \
+  --selection-name [method] \
+  --shadow-run-dir [input dir] \
+  --shadow-run-dir [input dir] \
+  --out-dir [output dir]
 ```
 
 ## Outputs
