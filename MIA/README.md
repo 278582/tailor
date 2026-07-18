@@ -23,8 +23,8 @@ risk for each synthetic selection.
 ## Environment
 
 ```bash
-/mnt/lustre/liuzhiwei/miniconda3/bin/conda create -n MIA --override-channels -c conda-forge python=3.10 -y
-/mnt/lustre/liuzhiwei/miniconda3/bin/conda install -n MIA --override-channels -c conda-forge \
+/*/miniconda3/bin/conda create -n MIA --override-channels -c conda-forge python=3.10 -y
+/*/miniconda3/bin/conda install -n MIA --override-channels -c conda-forge \
   numpy pandas scipy scikit-learn joblib tqdm xgboost pytest matplotlib seaborn -y
 ```
 
@@ -36,7 +36,7 @@ require it. Install it separately only when the current pip index is reachable.
 Audit all selections in a postprocess run:
 
 ```bash
-/mnt/lustre/liuzhiwei/miniconda3/bin/conda run -n MIA \
+/*/miniconda3/bin/conda run -n MIA \
   python -m MIA.cli \
   --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
   --all-selections \
