@@ -101,6 +101,32 @@ versions/selection_scalar.csv
 versions/selection_pareto.csv  # pareto-like version
 ```
 
+Adult with a pre-generated TabDiff(or others) sample:
+
+```bash
+python -m post_selection_tool.cli \
+  --synthetic-csv third_party/sample/{model}/adult/sample_0.csv \
+  --dataset-name adult \
+  --exp-name adult_ps \
+  --artifact-dir artifacts/postprocess/{model}/adult \
+  --source ${model} \
+  --keep-k 32561 \
+  --preselect-target 45585 \
+  --d-cur-size 2000 \
+  --density-reference-size 5000 \
+  --theta-source final \
+  --theta-mcts-dir artifacts/llm_mcts_v2/adult/single_theta/mcts_v2 \
+  --dcr-signal-full-reference \
+  --direct-dcr-repair-v19-target-margin 0.03 \
+  --direct-dcr-repair-v19-max-swap-fraction 0.30 \
+  --direct-dcr-repair-v19-candidate-neighbors 64 \
+  --privacy-version v2 \
+  --nn-device cpu \
+  --eval-device cpu \
+  --disable-progress \
+  --skip-validation-records
+```
+
 ## Evaluate Selections
 
 For a lightweight CPU check, use the PyTorch MLP utility evaluator:
@@ -186,6 +212,32 @@ The final selected theta and table are in:
 ```text
 final/theta_star.json
 final/final_pareto.csv  # pareto-like version
+```
+
+LLM-backed run in all process:
+
+```bash
+python -m llm_mcts_tool.v2_cli \
+  --dataset-name adult \
+  --artifact-dir artifacts/llm_mcts_v2/adult \
+  --exp-name adult_lm \
+  --mode single \
+  --single-source tabdiff \
+  --provider llm \
+  --mcts-budget 50 \
+  --theta-proposals-per-event 4 \
+  --keep-k 32561 \
+  --preselect-target 45585 \
+  --d-cur-size 2000 \
+  --density-reference-size 5000 \
+  --direct-dcr-repair-v19-target-margin 0.03 \
+  --direct-dcr-repair-v19-max-swap-fraction 0.30 \
+  --direct-dcr-repair-v19-candidate-neighbors 64 \
+  --privacy-version v2 \
+  --eval-device cpu \
+  --nn-device cpu \
+  --utility-exact-evaluator torch_lightweight_mlp \
+  --disable-progress
 ```
 
 ## Reuse a Found Theta
