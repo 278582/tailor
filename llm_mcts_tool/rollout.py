@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import pandas as pd
 
 from metric_tool.config import MetricConfig
 from metric_tool.pipeline import evaluate_single_selection
+from post_selection_tool.census_profile import apply_census_runtime_profile
 from post_selection_tool.config import CoreSelectionConfig, progress_enabled
 from post_selection_tool.context import prepare_context
 from post_selection_tool.exact_score import compute_global_exact_scores
@@ -19,6 +21,7 @@ from post_selection_tool.io import ensure_dir, save_csv, save_json, save_jsonl
 from post_selection_tool.pareto_repair import apply_pareto_post_selection_repairs
 from post_selection_tool.preselect import build_preselected_valid
 from post_selection_tool.reward_candidate_v2 import refine_selection_for_reward_v2
+from post_selection_tool.timing import log_pipeline_stages, nsga_selection_path, record_pipeline_stage
 from post_selection_tool.validation import build_cards_and_validate, initialize_selector_and_pool
 from postprocess.tabdiff_utils import find_latest_tabdiff_sample
 
@@ -135,7 +138,7 @@ def _resolve_rollout_synthetic_csv(config: GuidedRolloutConfig) -> Path:
 def _build_core_config(config: GuidedRolloutConfig, theta: StrategyTheta) -> CoreSelectionConfig:
     rollout_dir = Path(config.rollout_dir)
     mcts_dir = rollout_dir.parent.parent
-    return CoreSelectionConfig(
+    return apply_census_runtime_profile(CoreSelectionConfig(
         synthetic_csv=_resolve_rollout_synthetic_csv(config),
         dataset_name=config.dataset_name,
         exp_name=rollout_dir.name,
@@ -173,13 +176,16 @@ def _build_core_config(config: GuidedRolloutConfig, theta: StrategyTheta) -> Cor
         nn_device=config.nn_device,
         eval_device=config.eval_device,
         disable_progress=config.disable_progress,
-    )
+        utility_exact_evaluator=config.utility_exact_evaluator,
+        utility_exact_torch_epochs=config.utility_exact_torch_epochs,
+    ))
 
 
 def _select_guided_pareto(state: Any) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
     if state.selector is None:
         raise RuntimeError("selector is required before guided Pareto selection")
-    return state.selector.select_keep(
+    started = time.perf_counter()
+    keep_df, keep_records, report = state.selector.select_keep(
         preselected_records=state.preselected_valid,
         surrogate_records=[],
         exact_records=state.global_exact_records,
@@ -193,6 +199,19 @@ def _select_guided_pareto(state: Any) -> tuple[pd.DataFrame, list[dict[str, Any]
         soft_utility_floor_eps=state.config.pareto_soft_utility_floor_eps,
         soft_min_score_delta=state.config.pareto_soft_min_score_delta,
     )
+    record_pipeline_stage(
+        state.timing_report,
+        "nsga_ii",
+        float(time.perf_counter() - started),
+        nsga_ii_selection_path=nsga_selection_path(
+            report,
+            has_floor_reference=bool(state.floor_reference),
+        ),
+        nsga_ii_front_component_mode=report.get("front_component_mode"),
+        nsga_ii_rows=int(len(state.preselected_valid)),
+        nsga_ii_keep_k=int(state.effective_keep_k),
+    )
+    return keep_df, keep_records, report
 
 
 def _apply_rollout_reward_candidate_v2(
@@ -321,6 +340,7 @@ def _save_rollout_artifacts(
     save_json(internal_dir / "preselect_status.json", state.preselect_status)
     save_json(internal_dir / "fidelity_ceiling_report.json", state.fidelity_ceiling_report)
     save_json(internal_dir / "baselines.json", state.global_baselines)
+    save_json(internal_dir / "timing_report.json", state.timing_report)
     save_json(
         internal_dir / "utility_proxy_manifest.json",
         {
@@ -337,6 +357,7 @@ def _save_rollout_artifacts(
         "pareto_report": pareto_report,
         "global_baselines": state.global_baselines,
         "utility_proxy_manifest": state.utility_proxy_bundle.get("manifest", {}),
+        "timing": state.timing_report,
     }
     save_json(
         rollout_dir / "rollout_report.json",
@@ -478,6 +499,7 @@ def _evaluate_rollout_selection(config: GuidedRolloutConfig, pareto_df: pd.DataF
         utility_exact_torch_epochs=config.utility_exact_torch_epochs,
         utility_exact_torch_importance_sample_size=0,
     )
+    metric_config = apply_census_runtime_profile(metric_config)
     return evaluate_single_selection(
         config=metric_config,
         selection_name="selection_pareto",
@@ -516,6 +538,7 @@ def run_guided_pareto_rollout(
         pareto_report=pareto_report,
     )
     pareto_report = {**pareto_report, "reward_candidate_v2": reward_v2_report}
+    log_pipeline_stages(state.timing_report)
     search_objectives = _compute_search_objectives(
         selector=state.selector,
         pareto_df=pareto_df,

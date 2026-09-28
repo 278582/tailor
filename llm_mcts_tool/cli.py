@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from post_selection_tool.census_profile import apply_census_runtime_profile
+
 from .config import MCTSGuideConfig
 from .llm_client import OpenAICompatibleLLMClient, load_env_file
 from .pipeline import run_mcts_with_provider
@@ -58,7 +60,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def config_from_args(args: argparse.Namespace) -> MCTSGuideConfig:
-    return MCTSGuideConfig(
+    return apply_census_runtime_profile(MCTSGuideConfig(
         dataset_name=args.dataset_name,
         exp_name=args.exp_name,
         synthetic_csv=args.synthetic_csv,
@@ -92,7 +94,7 @@ def config_from_args(args: argparse.Namespace) -> MCTSGuideConfig:
         llm_retry_backoff=args.llm_retry_backoff,
         prompt_pack_dir=args.prompt_pack_dir,
         refine_prompt_use_dataset_priors=not bool(args.disable_refine_dataset_priors),
-    )
+    ))
 
 
 def provider_from_args(args: argparse.Namespace):

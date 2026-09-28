@@ -1,9 +1,29 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
-from .llm_client import OpenAICompatibleLLMClient, load_env_file
+from .llm_client import (
+    DASHSCOPE_COMPAT_URLS,
+    GLM_DEFAULT_API_KEY_ENV,
+    GLM_DEFAULT_MAX_TOKENS,
+    GLM_DEFAULT_MODEL,
+    GLM_DEFAULT_TEMPERATURE,
+    GLM_DEFAULT_TIMEOUT,
+    GPT_LUNA_DEFAULT_API_KEY_ENV,
+    GPT_LUNA_DEFAULT_BASE_URL,
+    GPT_LUNA_DEFAULT_MODEL,
+    GptLunaLLMClient,
+    OpenAICompatibleLLMClient,
+    VolcengineArkLLMClient,
+    is_glm_model,
+    is_gpt_luna_model,
+    load_env_file,
+    load_gpt_api_url_file,
+)
+from post_selection_tool.census_profile import apply_census_runtime_profile
+
 from .v2_pipeline import V2MCTSConfig, run_v2_mcts
 
 
@@ -22,10 +42,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--sources", type=str, default="great,smote,tabdiff,tabsyn")
     parser.add_argument("--single-source", type=str, default="tabdiff")
     parser.add_argument("--seed", type=int, default=20260420)
-    parser.add_argument("--keep-k", type=int, default=32561)
-    parser.add_argument("--preselect-target", type=int, default=45585)
-    parser.add_argument("--d-cur-size", type=int, default=1000)
-    parser.add_argument("--density-reference-size", type=int, default=5000)
+    parser.add_argument(
+        "--keep-k",
+        type=int,
+        default=None,
+        help="Rows to keep. Default: synthetic/{dataset}/train.csv size after the 90/10 train/hold split.",
+    )
+    parser.add_argument(
+        "--preselect-target",
+        type=int,
+        default=None,
+        help="Preselect pool size. Default: round(1.4 * keep_k) from the dataset search table.",
+    )
+    parser.add_argument(
+        "--d-cur-size",
+        type=int,
+        default=None,
+        help="Current-set size for density/DCR proxies. Default: 2000 from the dataset search table.",
+    )
+    parser.add_argument(
+        "--density-reference-size",
+        type=int,
+        default=None,
+        help="Density reference size. Default: 5000/8000/10000 by dataset from the search table.",
+    )
     parser.add_argument("--max-theta-pairs", type=int, default=32)
     parser.add_argument("--eval-device", type=str, default="auto")
     parser.add_argument("--nn-device", type=str, default="auto")
@@ -77,12 +117,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--rollout-direct-dcr-repair",
-        action="store_true",
-        help="Apply direct DCR repair after each LLM-MCTS Pareto rollout and before exact final evaluation.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Apply direct DCR repair after each LLM-MCTS Pareto rollout and before exact final evaluation. "
+            "Default: on for every dataset in the search table. Use --no-rollout-direct-dcr-repair to disable."
+        ),
     )
-    parser.add_argument("--rollout-direct-dcr-target-margin", type=float, default=0.03)
-    parser.add_argument("--rollout-direct-dcr-max-swap-fraction", type=float, default=0.30)
-    parser.add_argument("--rollout-direct-dcr-candidate-neighbors", type=int, default=64)
+    parser.add_argument("--rollout-direct-dcr-target-margin", type=float, default=None)
+    parser.add_argument("--rollout-direct-dcr-max-swap-fraction", type=float, default=None)
+    parser.add_argument("--rollout-direct-dcr-candidate-neighbors", type=int, default=None)
     parser.add_argument("--rollout-direct-dcr-min-pair-utility-gain", type=float, default=-0.08)
     parser.add_argument("--rollout-direct-dcr-fallback-min-pair-utility-gain", type=float, default=-0.18)
     parser.add_argument(
@@ -111,13 +155,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--force-new-s-at-event", type=int, default=None)
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--provider", choices=["llm", "mock"], default="llm")
+    parser.add_argument(
+        "--provider",
+        choices=["llm", "mock", "glm", "gpt"],
+        default="llm",
+        help=(
+            "llm keeps DashScope/OpenAI-compatible calls; glm uses Volcengine Ark; "
+            "gpt uses gpt-5.6-luna. Model names glm-* / gpt-5.6* also auto-route when --provider llm."
+        ),
+    )
     parser.add_argument("--llm-model", type=str, default="qwen3.7-plus")
     parser.add_argument("--llm-base-url", type=str, default="https://dashscope.aliyuncs.com/compatible-mode/v1")
     parser.add_argument("--llm-api-key-env", type=str, default="DASHSCOPE_API_KEY")
     parser.add_argument("--llm-timeout", type=int, default=300)
     parser.add_argument("--llm-max-retries", type=int, default=2)
     parser.add_argument("--llm-retry-backoff", type=float, default=3.0)
+    parser.add_argument(
+        "--glm-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Only used with --provider glm. Default: enabled, matching volcengine/glm-5-2-260617.py.",
+    )
+    parser.add_argument(
+        "--glm-max-tokens",
+        type=int,
+        default=GLM_DEFAULT_MAX_TOKENS,
+        help="Only used with --provider glm.",
+    )
+    parser.add_argument(
+        "--glm-temperature",
+        type=float,
+        default=GLM_DEFAULT_TEMPERATURE,
+        help="Only used with --provider glm.",
+    )
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--save-validation-records", action="store_true")
     parser.add_argument("--save-rollout-internal-records", action="store_true")
@@ -126,7 +196,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def config_from_args(args: argparse.Namespace) -> V2MCTSConfig:
-    return V2MCTSConfig(
+    return apply_census_runtime_profile(V2MCTSConfig(
         dataset_name=args.dataset_name,
         exp_name=args.exp_name,
         artifact_dir=args.artifact_dir,
@@ -158,7 +228,7 @@ def config_from_args(args: argparse.Namespace) -> V2MCTSConfig:
         source_profile_sample_rows=args.source_profile_sample_rows,
         utility_diag_sample_size=args.utility_diag_sample_size,
         utility_exact_torch_epochs=args.utility_exact_torch_epochs,
-        rollout_direct_dcr_repair_enabled=bool(args.rollout_direct_dcr_repair),
+        rollout_direct_dcr_repair_enabled=args.rollout_direct_dcr_repair,
         rollout_direct_dcr_target_margin=args.rollout_direct_dcr_target_margin,
         rollout_direct_dcr_max_swap_fraction=args.rollout_direct_dcr_max_swap_fraction,
         rollout_direct_dcr_candidate_neighbors=args.rollout_direct_dcr_candidate_neighbors,
@@ -175,13 +245,54 @@ def config_from_args(args: argparse.Namespace) -> V2MCTSConfig:
         force_new_s_at_event=args.force_new_s_at_event,
         smoke=bool(args.smoke),
         provider=args.provider,
-    )
+    ))
 
 
 def client_from_args(args: argparse.Namespace):
     if args.provider == "mock":
         return None
     load_env_file(args.env_file)
+    load_gpt_api_url_file()
+    use_glm = args.provider == "glm" or is_glm_model(args.llm_model)
+    if use_glm:
+        model = args.llm_model
+        api_key_env = args.llm_api_key_env
+        timeout = args.llm_timeout
+        if model == "qwen3.7-plus":
+            model = GLM_DEFAULT_MODEL
+        if api_key_env == "DASHSCOPE_API_KEY":
+            api_key_env = GLM_DEFAULT_API_KEY_ENV
+        if timeout == 300:
+            timeout = GLM_DEFAULT_TIMEOUT
+        return VolcengineArkLLMClient(
+            model=model,
+            api_key_env=api_key_env,
+            timeout=timeout,
+            max_retries=args.llm_max_retries,
+            retry_backoff=args.llm_retry_backoff,
+            thinking=bool(args.glm_thinking),
+            max_tokens=int(args.glm_max_tokens),
+            temperature=float(args.glm_temperature),
+        )
+    use_gpt_luna = args.provider == "gpt" or is_gpt_luna_model(args.llm_model)
+    if use_gpt_luna:
+        model = args.llm_model
+        api_key_env = args.llm_api_key_env
+        base_url = str(args.llm_base_url).rstrip("/")
+        if model == "qwen3.7-plus":
+            model = GPT_LUNA_DEFAULT_MODEL
+        if api_key_env == "DASHSCOPE_API_KEY":
+            api_key_env = GPT_LUNA_DEFAULT_API_KEY_ENV
+        if base_url in DASHSCOPE_COMPAT_URLS:
+            base_url = os.environ.get("OPENAI_BASE_URL", GPT_LUNA_DEFAULT_BASE_URL).rstrip("/")
+        return GptLunaLLMClient(
+            model=model,
+            base_url=base_url,
+            api_key_env=api_key_env,
+            timeout=args.llm_timeout,
+            max_retries=args.llm_max_retries,
+            retry_backoff=args.llm_retry_backoff,
+        )
     return OpenAICompatibleLLMClient(
         model=args.llm_model,
         base_url=args.llm_base_url,

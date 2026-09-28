@@ -5,8 +5,9 @@ import math
 import random
 import re
 import statistics
+import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations
 from pathlib import Path
 from typing import Any, Callable
@@ -23,6 +24,10 @@ except Exception:
     pass
 warnings.filterwarnings("ignore", message=r".*old version of glibc.*", category=FutureWarning)
 
+from post_selection_tool.census_profile import (
+    CENSUS_LARGE_SCORE_DUMP_MAX_ROWS,
+    is_census_dataset,
+)
 from post_selection_tool.context import resolve_eval_device, resolve_nn_device
 from post_selection_tool.io import ensure_dir, save_csv, save_json, save_jsonl
 from post_selection_tool.selector import ParetoSelector
@@ -33,9 +38,16 @@ from postprocess.cards import build_and_save_cards
 from postprocess.tabdiff_protocol import normalize_tabdiff_dataframe_columns, resolve_tabdiff_selection_context
 from postprocess.validator import TabularValidator
 
+from .dataset_defaults import DATASET_SEARCH_FILL_FIELDS, fill_none_search_fields
 from .feedback import build_guard
 from .llm_client import LLMClient
 from .rollout import GuidedRolloutConfig, GuidedRolloutResult, run_guided_pareto_rollout
+from .run_observability import (
+    initialize_run_observability,
+    llm_usage_type,
+    maybe_record_budget_snapshot,
+    record_llm_call_latency,
+)
 from .strategy import (
     StrategyProposal,
     StrategyTheta,
@@ -48,7 +60,16 @@ from .strategy import (
 )
 
 
-SUPPORTED_V2_DATASETS = {"adult", "beijing", "default", "diabetes", "magic", "news", "shoppers"}
+SUPPORTED_V2_DATASETS = {
+    "adult",
+    "beijing",
+    "default",
+    "diabetes",
+    "magic",
+    "news",
+    "shoppers",
+    "us_census_data_1990",
+}
 SOURCE_ALIASES = {
     "tansyn": "tabsyn",
     "tabsyn": "tabsyn",
@@ -79,10 +100,10 @@ class V2MCTSConfig:
     mode: str = "mixed"
     single_source: str = "tabdiff"
     seed: int = 20260420
-    keep_k: int = 32561
-    preselect_target: int = 45585
-    d_cur_size: int = 1000
-    density_reference_size: int = 5000
+    keep_k: int | None = None
+    preselect_target: int | None = None
+    d_cur_size: int | None = None
+    density_reference_size: int | None = None
     max_theta_pairs: int = 32
     eval_device: str = "auto"
     nn_device: str = "auto"
@@ -103,10 +124,10 @@ class V2MCTSConfig:
     source_profile_repeats: int = 4
     source_profile_sample_rows: int | None = None
     utility_diag_sample_size: int = 6000
-    rollout_direct_dcr_repair_enabled: bool = False
-    rollout_direct_dcr_target_margin: float = 0.03
-    rollout_direct_dcr_max_swap_fraction: float = 0.30
-    rollout_direct_dcr_candidate_neighbors: int = 64
+    rollout_direct_dcr_repair_enabled: bool | None = None
+    rollout_direct_dcr_target_margin: float | None = None
+    rollout_direct_dcr_max_swap_fraction: float | None = None
+    rollout_direct_dcr_candidate_neighbors: int | None = None
     rollout_direct_dcr_min_pair_utility_gain: float = -0.08
     rollout_direct_dcr_fallback_min_pair_utility_gain: float = -0.18
     rollout_reward_candidate_v2_enabled: bool = False
@@ -119,6 +140,28 @@ class V2MCTSConfig:
     early_stop_stagnation_events: int = 6
     force_new_s_at_event: int | None = None
     smoke: bool = False
+
+    def __post_init__(self) -> None:
+        filled = fill_none_search_fields(
+            {key: getattr(self, key) for key in DATASET_SEARCH_FILL_FIELDS},
+            self.dataset_name,
+        )
+        for key in DATASET_SEARCH_FILL_FIELDS:
+            if getattr(self, key) is None and key in filled:
+                setattr(self, key, filled[key])
+
+
+def materialize_v2_search_defaults(config: V2MCTSConfig) -> V2MCTSConfig:
+    filled = fill_none_search_fields(
+        {key: getattr(config, key) for key in DATASET_SEARCH_FILL_FIELDS},
+        config.dataset_name,
+    )
+    updates = {
+        key: filled[key]
+        for key in DATASET_SEARCH_FILL_FIELDS
+        if getattr(config, key) is None and key in filled
+    }
+    return replace(config, **updates) if updates else config
 
 
 @dataclass
@@ -682,6 +725,28 @@ def _normalize_source_frame(dataset_name: str, df: pd.DataFrame) -> pd.DataFrame
     return normalized
 
 
+def _census_source_read_nrows(config: V2MCTSConfig) -> int | None:
+    if not is_census_dataset(config.dataset_name):
+        return None
+    keep_k = max(1, int(config.keep_k or 1))
+    preselect = max(keep_k, int(config.preselect_target or keep_k))
+    return max(4096, int(math.ceil(preselect * 1.5)))
+
+
+def _write_pool_row_map(path: Path, row_map: list[dict[str, Any]], *, dataset_name: str) -> None:
+    if is_census_dataset(dataset_name) and len(row_map) > CENSUS_LARGE_SCORE_DUMP_MAX_ROWS:
+        save_json(
+            Path(path).with_name(f"{Path(path).stem}.skip.json"),
+            {
+                "skipped": True,
+                "reason": "census_skip_large_jsonl",
+                "rows": int(len(row_map)),
+            },
+        )
+        return
+    save_jsonl(path, row_map)
+
+
 def _load_valid_source_frame(
     *,
     dataset_name: str,
@@ -692,19 +757,33 @@ def _load_valid_source_frame(
     stats_card: dict[str, Any],
     validation_dir: Path | None = None,
     save_records: bool = False,
+    max_rows: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    source_df = _normalize_source_frame(dataset_name, pd.read_csv(path))[column_order].copy()
-    records = [
-        {"candidate_id": int(idx), "row": row}
-        for idx, row in zip(source_df.index.tolist(), source_df.to_dict(orient="records"))
-    ]
-    bundle = TabularValidator(schema_card, stats_card).validate(records)
-    valid_source_ids = [int(record["candidate_id"]) for record in bundle.valid_records]
-    valid_df = pd.DataFrame(
-        [record["row"] for record in bundle.valid_records],
-        columns=column_order,
-        index=pd.Index(valid_source_ids, name="source_row_id"),
-    )
+    read_kwargs: dict[str, Any] = {}
+    if max_rows is not None:
+        read_kwargs["nrows"] = int(max_rows)
+    source_df = _normalize_source_frame(dataset_name, pd.read_csv(path, **read_kwargs))[column_order].copy()
+    validator = TabularValidator(schema_card, stats_card)
+    if is_census_dataset(dataset_name):
+        bundle = validator.validate_dataframe(
+            source_df,
+            materialize_rejected=bool(save_records),
+        )
+        valid_source_ids = [int(record["candidate_id"]) for record in bundle.valid_records]
+        valid_df = bundle.valid_df.copy()
+        valid_df.index = pd.Index(valid_source_ids, name="source_row_id")
+    else:
+        records = [
+            {"candidate_id": int(idx), "row": row}
+            for idx, row in zip(source_df.index.tolist(), source_df.to_dict(orient="records"))
+        ]
+        bundle = validator.validate(records)
+        valid_source_ids = [int(record["candidate_id"]) for record in bundle.valid_records]
+        valid_df = pd.DataFrame(
+            [record["row"] for record in bundle.valid_records],
+            columns=column_order,
+            index=pd.Index(valid_source_ids, name="source_row_id"),
+        )
     reject_reason_histogram: dict[str, int] = {}
     for record in bundle.rejected_records:
         reason = str(record.get("reason", "unknown"))
@@ -715,6 +794,7 @@ def _load_valid_source_frame(
         "source_path": str(path),
         "rows_before": int(len(source_df)),
         "rows_after": int(len(valid_df)),
+        "read_nrows": None if max_rows is None else int(max_rows),
         "reject_reason_histogram": reject_reason_histogram,
         "rejected_preview": bundle.rejected_records[:10],
     })
@@ -1796,6 +1876,8 @@ def build_source_profiles(
     selector.utility_exact_evaluator = config.utility_exact_evaluator
     selector.utility_exact_torch_epochs = config.utility_exact_torch_epochs
     selector.utility_exact_torch_importance_sample_size = 0
+    selector.utility_exact_torch_batch_size = int(getattr(config, "utility_exact_torch_batch_size", 2048) or 2048)
+    selector.eval_device = eval_device
     runner = TabDiffMetricRunner(
         dataset_name=config.dataset_name,
         device=eval_device,
@@ -1803,6 +1885,9 @@ def build_source_profiles(
         real_data_path=profile_train_path,
         test_data_path=profile_test_path,
         val_data_path=profile_holdout_path,
+        dcr_repeats=int(getattr(config, "dcr_repeats", 10)),
+        dcr_cap=int(getattr(config, "dcr_cap", 0) or 0),
+        dcr_seed=int(getattr(config, "seed", 20260420)),
     )
     column_lookup = _tabdiff_metric_column_lookup(config.dataset_name)
     source_profiles: dict[str, Any] = {}
@@ -1819,6 +1904,7 @@ def build_source_profiles(
             stats_card=stats_card,
             validation_dir=source_dir / "validation",
             save_records=config.save_validation_records,
+            max_rows=_census_source_read_nrows(config),
         )
         repeat_reports: list[dict[str, Any]] = []
         sample_profiles: list[dict[str, Any]] = []
@@ -1951,7 +2037,7 @@ def _normalize_source_name(source_name: str) -> str:
     return SOURCE_ALIASES[key]
 
 
-def _resolve_source_path(config: V2MCTSConfig, source_id: str) -> Path:
+def _source_sample_path(config: V2MCTSConfig, source_id: str) -> Path | None:
     source = _normalize_source_name(source_id)
     preferred = Path(config.sample_root) / source / config.dataset_name / "sample_0.csv"
     if preferred.exists():
@@ -1959,6 +2045,15 @@ def _resolve_source_path(config: V2MCTSConfig, source_id: str) -> Path:
     legacy = Path(config.sample_root) / source / config.dataset_name / "samples_0.csv"
     if legacy.exists():
         return legacy
+    return None
+
+
+def _resolve_source_path(config: V2MCTSConfig, source_id: str) -> Path:
+    source = _normalize_source_name(source_id)
+    path = _source_sample_path(config, source_id)
+    if path is not None:
+        return path
+    preferred = Path(config.sample_root) / source / config.dataset_name / "sample_0.csv"
     raise FileNotFoundError(f"Cannot find synthetic sample for source={source}: {preferred}")
 
 
@@ -1968,9 +2063,28 @@ def resolve_sources(config: V2MCTSConfig) -> dict[str, SourceInfo]:
         if config.mode == "single"
         else tuple(_normalize_source_name(source) for source in config.source_names)
     )
+    requested = tuple(dict.fromkeys(source_names))
+    found: list[tuple[str, Path]] = []
+    missing: list[str] = []
+    for source_id in requested:
+        path = _source_sample_path(config, source_id)
+        if path is None:
+            missing.append(source_id)
+        else:
+            found.append((source_id, path))
+    if is_census_dataset(config.dataset_name):
+        if not found:
+            missing_txt = ", ".join(missing) if missing else "none"
+            raise FileNotFoundError(
+                f"Cannot find any synthetic sample for census sources={missing_txt}"
+            )
+    elif missing:
+        raise FileNotFoundError(
+            f"Cannot find synthetic sample for source={missing[0]}: "
+            f"{Path(config.sample_root) / missing[0] / config.dataset_name / 'sample_0.csv'}"
+        )
     sources: dict[str, SourceInfo] = {}
-    for source_id in dict.fromkeys(source_names):
-        path = _resolve_source_path(config, source_id)
+    for source_id, path in found:
         header = _normalize_source_frame(config.dataset_name, pd.read_csv(path, nrows=0))
         rows = sum(1 for _ in path.open("r", encoding="utf-8", errors="ignore")) - 1
         sources[source_id] = SourceInfo(
@@ -1980,6 +2094,15 @@ def resolve_sources(config: V2MCTSConfig) -> dict[str, SourceInfo]:
             columns=[str(column) for column in header.columns],
         )
     return sources
+
+
+def adapt_census_v2_source_mode(config: V2MCTSConfig, sources: dict[str, SourceInfo]) -> V2MCTSConfig:
+    if not is_census_dataset(config.dataset_name):
+        return config
+    if config.mode == "mixed" and len(sources) < 2:
+        source_id = next(iter(sources))
+        return replace(config, mode="single", single_source=source_id)
+    return config
 
 
 def _canonical_s_key(pool_units: list[dict[str, Any]]) -> str:
@@ -2748,12 +2871,15 @@ def _call_llm_json(
     status_path = call_dir / "status.json"
     prompt_path.write_text(prompt, encoding="utf-8")
     phase, purpose = _llm_call_purpose(schema_name)
+    usage_type = llm_usage_type(schema_name)
+    mcts_dir = Path(trace_dir).parent
     save_json(
         input_summary_path,
         {
             "schema_name": schema_name,
             "phase": phase,
             "purpose": purpose,
+            "usage_type": usage_type,
             "prompt_chars": int(len(prompt)),
             "prompt_lines": int(prompt.count("\n") + 1),
             "prompt_estimated_tokens": int(math.ceil(len(prompt) / 4)),
@@ -2769,6 +2895,7 @@ def _call_llm_json(
         "input_summary_file": str(input_summary_path),
         "response_file": str(response_path),
         "provider": "mock" if client is None else "llm",
+        "usage_type": usage_type,
     }
     pending_status = {"available": False, "status": "pending", "reason": "llm_call_started"}
     save_json(status_path, pending_status)
@@ -2791,13 +2918,15 @@ def _call_llm_json(
         encoding="utf-8",
     )
     if client is None:
-        status = {"available": False, "status": "mock", "reason": "mock_provider_no_llm_call"}
+        started = time.perf_counter()
+        status = {"available": False, "status": "mock", "reason": "mock_provider_no_llm_call", "usage_type": usage_type}
         mock_payload = {
             "available": False,
             "status": "mock",
             "schema_name": schema_name,
             "phase": phase,
             "purpose": purpose,
+            "usage_type": usage_type,
             "fallback_description": _mock_fallback_description(schema_name),
         }
         save_json(status_path, status)
@@ -2823,27 +2952,64 @@ def _call_llm_json(
             + "\n",
             encoding="utf-8",
         )
+        elapsed_sec = time.perf_counter() - started
+        status["elapsed_sec"] = elapsed_sec
+        save_json(status_path, status)
+        record_llm_call_latency(
+            mcts_dir=mcts_dir,
+            schema_name=schema_name,
+            elapsed_sec=elapsed_sec,
+            status="mock",
+            call_dir=call_dir,
+        )
         _append_jsonl_record(Path(trace_dir) / "manifest.jsonl", {**manifest_record, **status})
         return None
+    started = time.perf_counter()
     try:
         payload = client.complete_json(prompt, schema_name)
+        elapsed_sec = time.perf_counter() - started
     except Exception as exc:
-        status = {"available": False, "status": "error", "error": str(exc)}
+        elapsed_sec = time.perf_counter() - started
+        status = {
+            "available": False,
+            "status": "error",
+            "error": str(exc),
+            "usage_type": usage_type,
+            "elapsed_sec": elapsed_sec,
+        }
         save_json(status_path, status)
         response_path.write_text(
             f"# LLM response\n\nStatus: error\n\nError:\n\n```text\n{exc}\n```\n",
             encoding="utf-8",
         )
+        record_llm_call_latency(
+            mcts_dir=mcts_dir,
+            schema_name=schema_name,
+            elapsed_sec=elapsed_sec,
+            status="error",
+            call_dir=call_dir,
+        )
         _append_jsonl_record(Path(trace_dir) / "manifest.jsonl", {**manifest_record, **status})
         return None
-    call = getattr(client, "last_call", None) or {}
     save_json(call_dir / "response.parsed.json", payload)
-    status = {"available": True, "status": "success"}
+    status = {
+        "available": True,
+        "status": "success",
+        "usage_type": usage_type,
+        "elapsed_sec": elapsed_sec,
+    }
     save_json(status_path, status)
     response_path.write_text(
         "# LLM response\n\nStatus: success\n\nParsed JSON:\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n",
         encoding="utf-8",
+    )
+    record_llm_call_latency(
+        mcts_dir=mcts_dir,
+        schema_name=schema_name,
+        elapsed_sec=elapsed_sec,
+        status="success",
+        call_dir=call_dir,
     )
     _append_jsonl_record(Path(trace_dir) / "manifest.jsonl", {**manifest_record, **status})
     return payload
@@ -3102,35 +3268,42 @@ def build_s_pool(
             stats_card=stats_card,
             validation_dir=output_dir / "source_validation" / source_id,
             save_records=config.save_validation_records,
+            max_rows=_census_source_read_nrows(config),
         )
         source_indices = [int(idx) for idx in source_df.index.tolist()]
         source_df = source_df.reset_index(drop=True)
         synthetic_csv = output_dir / "synthetic_pool.csv"
         row_map_path = output_dir / "synthetic_pool_rows.jsonl"
         save_csv(synthetic_csv, source_df)
-        save_jsonl(
-            row_map_path,
-            [
-                {
-                    "pool_row_id": int(idx),
-                    "source_id": source_id,
-                    "source_row_id": int(source_indices[idx]),
-                    "draw_index": 0,
-                    "draw_local_index": int(idx),
-                    "sample_seed": None,
-                    "with_replacement": False,
-                    "sampling_mode": "single_full_source_no_random_sampling",
-                }
-                for idx in range(len(source_df))
-            ],
-        )
+        row_map = [
+            {
+                "pool_row_id": int(idx),
+                "source_id": source_id,
+                "source_row_id": int(source_indices[idx]),
+                "draw_index": 0,
+                "draw_local_index": int(idx),
+                "sample_seed": None,
+                "with_replacement": False,
+                "sampling_mode": (
+                    "census_capped_source"
+                    if is_census_dataset(config.dataset_name)
+                    else "single_full_source_no_random_sampling"
+                ),
+            }
+            for idx in range(len(source_df))
+        ]
+        _write_pool_row_map(row_map_path, row_map, dataset_name=config.dataset_name)
         report = {
             "s_id": s_id,
             "rows": int(len(source_df)),
             "target_rows": int(len(source_df)),
             "pool_units": pool_units,
             "source_counts": {source_id: int(len(source_df))},
-            "sampling_mode": "single_full_source_no_random_sampling",
+            "sampling_mode": (
+                "census_capped_source"
+                if is_census_dataset(config.dataset_name)
+                else "single_full_source_no_random_sampling"
+            ),
             "source_path": str(info.path),
             "source_validation": {source_id: source_validation},
         }
@@ -3155,6 +3328,7 @@ def build_s_pool(
             stats_card=stats_card,
             validation_dir=output_dir / "source_validation" / source_id,
             save_records=config.save_validation_records,
+            max_rows=_census_source_read_nrows(config),
         )
         source_validations[source_id] = source_validation
         replace = rows_to_draw > len(source_df)
@@ -3185,7 +3359,7 @@ def build_s_pool(
     synthetic_csv = output_dir / "synthetic_pool.csv"
     row_map_path = output_dir / "synthetic_pool_rows.jsonl"
     save_csv(synthetic_csv, pool_df)
-    save_jsonl(row_map_path, row_map)
+    _write_pool_row_map(row_map_path, row_map, dataset_name=config.dataset_name)
     report = {
         "s_id": s_id,
         "rows": int(len(pool_df)),
@@ -4376,6 +4550,47 @@ def _select_s_for_refine(
     }
 
 
+def _budget_snapshot_payload(
+    *,
+    s_nodes: dict[str, SNode],
+    theta_nodes: dict[str, ThetaNode],
+    best_node: ThetaNode | None,
+    include_source_context: bool,
+) -> dict[str, Any]:
+    s_node = None if best_node is None else s_nodes.get(best_node.s_id)
+    return {
+        "best_strategy": None
+        if best_node is None
+        else {
+            "node_id": best_node.node_id,
+            "s_id": best_node.s_id,
+            "theta_id": best_node.theta_id,
+            "theta": theta_to_dict(best_node.theta),
+            "pool_units": None if s_node is None else list(s_node.pool_units),
+            "reward": float(best_node.reward),
+            "exact_reward": best_node.exact_reward if best_node.exact_reward_available else None,
+            "search_reward": best_node.search_reward if best_node.search_reward_available else None,
+            "selection_score": float(_node_selection_score(best_node)),
+            "reward_type": best_node.reward_type,
+            "guard_pass": bool(best_node.guard_pass),
+            "llm_score": float(best_node.llm_score),
+            "status": best_node.status,
+            "audit_metrics": _metrics_4d_reward_summary(best_node.audit_metrics),
+            "compact": _archive_theta_summary(
+                best_node,
+                include_source_context=include_source_context,
+                depth=_theta_depth(best_node, theta_nodes),
+            ),
+        },
+        "progress": {
+            "total_theta_nodes": int(len(theta_nodes)),
+            "successful_rollouts": int(sum(1 for node in theta_nodes.values() if node.status == "success")),
+            "failed_rollouts": int(sum(1 for node in theta_nodes.values() if node.status == "failed")),
+            "total_s_nodes": int(len(s_nodes)),
+        },
+    }
+
+
 def _write_run_state(
     *,
     mcts_dir: Path,
@@ -4670,6 +4885,10 @@ def _evaluate_proposals(
 
 
 def run_v2_mcts(config: V2MCTSConfig, client: LLMClient | None = None) -> V2RunResult:
+    config = materialize_v2_search_defaults(config)
+    missing = [key for key in DATASET_SEARCH_FILL_FIELDS if getattr(config, key) is None]
+    if missing:
+        raise ValueError(f"dataset search defaults missing after materialize: {', '.join(missing)}")
     if config.dataset_name not in SUPPORTED_V2_DATASETS:
         supported = ", ".join(sorted(SUPPORTED_V2_DATASETS))
         raise ValueError(f"v2 runner currently supports dataset_name in {{{supported}}}")
@@ -4683,6 +4902,7 @@ def run_v2_mcts(config: V2MCTSConfig, client: LLMClient | None = None) -> V2RunR
     trace_dir = ensure_dir(mcts_dir / "llm_calls")
     ensure_dir(mcts_dir / "tree")
     ensure_dir(mcts_dir / "archive")
+    initialize_run_observability(mcts_dir)
 
     dataset_ctx = resolve_tabdiff_selection_context(
         dataset_name=config.dataset_name,
@@ -4704,6 +4924,7 @@ def run_v2_mcts(config: V2MCTSConfig, client: LLMClient | None = None) -> V2RunR
     stats_card = cards.stats_card
     dataset_prompt_context = _load_dataset_prompt_context(config, schema_card)
     sources = resolve_sources(config)
+    config = adapt_census_v2_source_mode(config, sources)
     save_json(context_dir / "source_registry.json", _json_safe({key: info.__dict__ for key, info in sources.items()}))
     save_json(context_dir / "dataset_prompt_context.json", dataset_prompt_context)
     save_json(context_dir / "run_config.json", _json_safe(config.__dict__))
@@ -5109,6 +5330,16 @@ def run_v2_mcts(config: V2MCTSConfig, client: LLMClient | None = None) -> V2RunR
             }
         )
         checkpoint_run_state("running")
+        maybe_record_budget_snapshot(
+            mcts_dir=mcts_dir,
+            event_idx=int(event_idx),
+            snapshot_payload=_budget_snapshot_payload(
+                s_nodes=s_nodes,
+                theta_nodes=theta_nodes,
+                best_node=theta_star,
+                include_source_context=include_source_context,
+            ),
+        )
         if _should_stop_for_hard_no_improve(hard_no_improve, early_stop_stagnation_threshold):
             event_trace.append(
                 {
