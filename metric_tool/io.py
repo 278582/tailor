@@ -31,12 +31,24 @@ def save_json(path: Path, payload: dict[str, Any] | list[Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def save_eval_timing(eval_dir: Path, selection_name: str, summary: dict[str, Any]) -> None:
+    save_json(eval_dir / selection_name / "metrics_summary.json", summary)
+    save_json(eval_dir / selection_name / "eval_timing.json", summary["eval_timing"])
+
+
 def load_core_selection_frames(versions_dir: Path) -> dict[str, pd.DataFrame]:
     frames: dict[str, pd.DataFrame] = {}
     for name, filename in CORE_SELECTION_FILES.items():
         path = versions_dir / filename
         if path.exists():
             frames[name] = pd.read_csv(path)
+    for path in sorted(versions_dir.glob("selection_scalar_*.csv")):
+        suffix = path.stem.removeprefix("selection_scalar_")
+        if not suffix:
+            continue
+        key = f"scalar_{suffix}"
+        if key not in frames:
+            frames[key] = pd.read_csv(path)
     return frames
 
 

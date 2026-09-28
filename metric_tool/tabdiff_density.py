@@ -11,6 +11,9 @@ import pandas as pd
 from postprocess.paths import TABDIFF_DIR
 from postprocess.tabdiff_utils import get_tabdiff_paths
 
+from .frame_canon import strip_string_cells
+from .dcr import bind_dcr_kernels
+
 
 def _ensure_tabdiff_import_path(tabdiff_root: Path) -> None:
     root_str = str(tabdiff_root)
@@ -54,6 +57,8 @@ def _reorder_for_sdmetrics(
     info: dict[str, Any],
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     num_col_idx, cat_col_idx = _tabdiff_ordered_indices(info)
+    real_data = strip_string_cells(real_data)
+    syn_data = strip_string_cells(syn_data)
     new_real_data = pd.concat([real_data[num_col_idx], real_data[cat_col_idx]], axis=1)
     new_syn_data = pd.concat([syn_data[num_col_idx], syn_data[cat_col_idx]], axis=1)
     new_real_data.columns = range(len(new_real_data.columns))
@@ -70,8 +75,8 @@ def _reorder_for_sdmetrics(
             metadata["columns"][out_idx] = columns[cat_col_idx[cat_offset]]
 
     for out_idx in range(len(num_col_idx), len(new_real_data.columns)):
-        new_real_data[out_idx] = new_real_data[out_idx].astype(str)
-        new_syn_data[out_idx] = new_syn_data[out_idx].astype(str)
+        new_real_data[out_idx] = new_real_data[out_idx].astype(str).str.strip()
+        new_syn_data[out_idx] = new_syn_data[out_idx].astype(str).str.strip()
     return new_real_data, new_syn_data, metadata
 
 
@@ -84,10 +89,18 @@ class TabDiffMetricRunner:
         real_data_path: Path | None = None,
         test_data_path: Path | None = None,
         val_data_path: Path | None = None,
+        dcr_repeats: int = 10,
+        dcr_cap: int = 0,
+        dcr_seed: int = 20260420,
+        nn_query_batch_size: int = 2048,
+        nn_reference_chunk_size: int = 8192,
     ) -> None:
         self.dataset_name = dataset_name
         self.paths = get_tabdiff_paths(dataset_name)
         self.info = load_tabdiff_info(dataset_name)
+        self.dcr_repeats = int(dcr_repeats)
+        self.dcr_cap = int(dcr_cap)
+        self.dcr_seed = int(dcr_seed)
         metric_list = metric_list or ["density", "dcr"]
         TabMetrics = _load_tabmetrics_class(TABDIFF_DIR)
         real_path = self.paths.synthetic_dir / "real.csv" if real_data_path is None else Path(real_data_path)
@@ -97,6 +110,12 @@ class TabDiffMetricRunner:
         self.real_data_path = real_path
         self.test_data_path = test_path
         self.val_data_path = val_path if val_path.exists() else None
+        bind_dcr_kernels(
+            self,
+            device=device,
+            query_batch_size=int(nn_query_batch_size),
+            reference_chunk_size=int(nn_reference_chunk_size),
+        )
         self.metrics = TabMetrics(
             real_data_path=str(real_path),
             test_data_path=str(test_path),
@@ -141,6 +160,10 @@ class TabDiffMetricRunner:
         for metric in self.metric_list:
             if metric == "density":
                 out_metrics, out_extras = self.evaluate_density(df.copy())
+            elif metric == "dcr":
+                from .dcr import evaluate_dcr
+
+                out_metrics, out_extras = evaluate_dcr(self, df.copy())
             else:
                 func = getattr(self.metrics, f"evaluate_{metric}")
                 out_metrics, out_extras = func(df.copy())

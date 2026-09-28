@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pandas as pd
 
-from .io import save_eval_extras, save_json
+from .dcr import evaluate_dcr
+from .io import save_eval_extras, save_eval_timing, save_json
 from .mle import evaluate_mle
 from .reward import compute_metric_reward
 from .tabdiff_density import TabDiffMetricRunner
+from .timing import build_eval_timing
 
 
 def build_dcr_balance_summary(raw_dcr: Any) -> dict[str, Any]:
@@ -87,6 +90,38 @@ def build_audit_metrics(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_selection_metrics(runner: TabDiffMetricRunner, df: pd.DataFrame) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    extras: dict[str, Any] = {}
+    sdmetrics_seconds = 0.0
+    aligned_dcr_seconds = 0.0
+    aligned_dcr_timed_repeats = 0
+    aligned_dcr_computed_repeats = 0
+    for metric in runner.metric_list:
+        if metric == "density":
+            started = time.perf_counter()
+            out_metrics, out_extras = runner.evaluate_density(df.copy())
+            sdmetrics_seconds = float(time.perf_counter() - started)
+        elif metric == "dcr":
+            out_metrics, out_extras = evaluate_dcr(runner, df.copy())
+            aligned_dcr_seconds = float(out_extras.pop("aligned_dcr_seconds", 0.0) or 0.0)
+            aligned_dcr_timed_repeats = int(out_extras.pop("aligned_dcr_timed_repeats", 0) or 0)
+            aligned_dcr_computed_repeats = int(out_extras.get("dcr_repeats", 0) or 0)
+        else:
+            func = getattr(runner.metrics, f"evaluate_{metric}")
+            out_metrics, out_extras = func(df.copy())
+        metrics.update(out_metrics)
+        extras.update(out_extras)
+    return {
+        "metrics": metrics,
+        "extras": extras,
+        "sdmetrics_seconds": sdmetrics_seconds,
+        "aligned_dcr_seconds": aligned_dcr_seconds,
+        "aligned_dcr_timed_repeats": aligned_dcr_timed_repeats,
+        "aligned_dcr_computed_repeats": aligned_dcr_computed_repeats,
+    }
+
+
 def evaluate_one_selection(
     *,
     selection_name: str,
@@ -96,14 +131,17 @@ def evaluate_one_selection(
     eval_dir,
     test_df: pd.DataFrame,
 ) -> dict[str, Any]:
-    metrics, extras = runner.evaluate(df)
+    measured = _run_selection_metrics(runner, df)
+    metrics = measured["metrics"]
+    extras = measured["extras"]
+
+    started = time.perf_counter()
     utility_exact_report = evaluate_mle(selector, df, test_df)
+    utility_exact_seconds = float(time.perf_counter() - started)
     extras = {
         **extras,
         "utility_exact_report": utility_exact_report,
     }
-    save_eval_extras(eval_dir=eval_dir, selection_name=selection_name, extras=extras)
-    save_json(eval_dir / selection_name / "utility_metrics_summary.json", utility_exact_report)
 
     raw_dcr = float(metrics.get("dcr", 0.0)) if "dcr" in metrics else None
     dcr_balance = build_dcr_balance_summary(raw_dcr)
@@ -141,6 +179,10 @@ def evaluate_one_selection(
         "metric_reward_score_direction": "higher_better",
         "metric_reward_score_semantics": "normalized_reward",
     }
+
+    started = time.perf_counter()
+    save_eval_extras(eval_dir=eval_dir, selection_name=selection_name, extras=extras)
+    save_json(eval_dir / selection_name / "utility_metrics_summary.json", utility_exact_report)
     reward_report = compute_metric_reward(
         summary=summary,
         selector=selector,
@@ -149,5 +191,22 @@ def evaluate_one_selection(
     summary["metric_reward"] = reward_report
     summary["metric_reward_score"] = float(reward_report.get("reward", 0.0))
     summary["audit_metrics"] = build_audit_metrics(summary)
-    save_json(eval_dir / selection_name / "metrics_summary.json", summary)
+    summary["eval_timing"] = build_eval_timing(
+        sdmetrics_seconds=measured["sdmetrics_seconds"],
+        aligned_dcr_seconds=measured["aligned_dcr_seconds"],
+        aligned_dcr_timed_repeats=measured["aligned_dcr_timed_repeats"],
+        aligned_dcr_computed_repeats=measured["aligned_dcr_computed_repeats"],
+        utility_exact_seconds=utility_exact_seconds,
+        summary_seconds=0.0,
+    )
+    save_eval_timing(eval_dir, selection_name, summary)
+    summary["eval_timing"] = build_eval_timing(
+        sdmetrics_seconds=measured["sdmetrics_seconds"],
+        aligned_dcr_seconds=measured["aligned_dcr_seconds"],
+        aligned_dcr_timed_repeats=measured["aligned_dcr_timed_repeats"],
+        aligned_dcr_computed_repeats=measured["aligned_dcr_computed_repeats"],
+        utility_exact_seconds=utility_exact_seconds,
+        summary_seconds=float(time.perf_counter() - started),
+    )
+    save_eval_timing(eval_dir, selection_name, summary)
     return summary

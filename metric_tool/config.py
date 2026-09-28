@@ -22,4 +22,7 @@ class MetricConfig:
     nn_reference_chunk_size: int = 8192
     utility_exact_evaluator: str = "tabdiff_mle"
     utility_exact_torch_epochs: int = 6
+    utility_exact_torch_batch_size: int = 2048
     utility_exact_torch_importance_sample_size: int = 2000
+    dcr_repeats: int = 10
+    dcr_cap: int = 0

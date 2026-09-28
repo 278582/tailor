@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from post_selection_tool.census_profile import apply_census_runtime_profile, bind_selector_utility_runtime
 from post_selection_tool.context import build_artifact_paths, resolve_eval_device, resolve_nn_device
 from post_selection_tool.selector import ParetoSelector
 from postprocess.tabdiff_protocol import resolve_tabdiff_selection_context
 
 from .config import MetricConfig
 from .evaluator import build_audit_metrics, evaluate_one_selection
-from .io import load_core_selection_frames, load_json, save_json
+from .io import load_core_selection_frames, load_json, save_eval_timing, save_json
 from .tabdiff_density import TabDiffMetricRunner
+from .timing import add_summary_elapsed
 
 
 def prepare_metric_objects(config: MetricConfig) -> dict[str, Any]:
+    config = apply_census_runtime_profile(config)
     dataset_ctx = resolve_tabdiff_selection_context(
         dataset_name=config.dataset_name,
         seed=config.seed,
@@ -41,16 +45,19 @@ def prepare_metric_objects(config: MetricConfig) -> dict[str, Any]:
         nn_reference_chunk_size=config.nn_reference_chunk_size,
         high_cardinality_enabled=False,
     )
-    selector.utility_exact_evaluator = config.utility_exact_evaluator
-    selector.utility_exact_torch_epochs = config.utility_exact_torch_epochs
-    selector.utility_exact_torch_importance_sample_size = config.utility_exact_torch_importance_sample_size
+    bind_selector_utility_runtime(selector, config)
     runner = TabDiffMetricRunner(
         dataset_name=config.dataset_name,
         device=eval_device,
         metric_list=["density", "dcr"],
-        real_data_path=paths.input_dir / "eval_train.csv",
-        test_data_path=paths.input_dir / "eval_test.csv",
-        val_data_path=paths.input_dir / "eval_holdout.csv",
+        real_data_path=dataset_ctx.train_source_path,
+        test_data_path=dataset_ctx.test_source_path,
+        val_data_path=dataset_ctx.holdout_source_path,
+        nn_query_batch_size=config.nn_query_batch_size,
+        nn_reference_chunk_size=config.nn_reference_chunk_size,
+        dcr_repeats=int(getattr(config, "dcr_repeats", 10)),
+        dcr_cap=int(getattr(config, "dcr_cap", 0) or 0),
+        dcr_seed=int(getattr(config, "dcr_seed", config.seed)),
     )
     return {
         "dataset_ctx": dataset_ctx,
@@ -124,7 +131,12 @@ def evaluate_single_selection(
         eval_dir=eval_dir,
         test_df=objects["dataset_ctx"].test_df.copy(),
     )
+    started = time.perf_counter()
     summary["audit_metrics"] = build_audit_metrics(summary)
     summary["metric_extras"] = _load_single_metric_extras(eval_dir, selection_name)
-    save_json(eval_dir / selection_name / "metrics_summary.json", summary)
+    summary["eval_timing"] = add_summary_elapsed(
+        summary.get("eval_timing"),
+        time.perf_counter() - started,
+    )
+    save_eval_timing(eval_dir, selection_name, summary)
     return summary

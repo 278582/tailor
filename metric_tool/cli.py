@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from post_selection_tool.census_profile import apply_census_runtime_profile
+
 from .config import MetricConfig
 from .pipeline import evaluate_single_selection, run_core_metrics
 
@@ -29,6 +31,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nn-device", type=str, default=MetricConfig.nn_device)
     parser.add_argument("--nn-query-batch-size", type=int, default=MetricConfig.nn_query_batch_size)
     parser.add_argument("--nn-reference-chunk-size", type=int, default=MetricConfig.nn_reference_chunk_size)
+    parser.add_argument("--dcr-repeats", type=int, default=MetricConfig.dcr_repeats)
+    parser.add_argument("--dcr-cap", type=int, default=MetricConfig.dcr_cap)
     parser.add_argument(
         "--utility-exact-evaluator",
         choices=["tabdiff_mle", "torch_lightweight_mlp"],
@@ -44,7 +48,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def config_from_args(args: argparse.Namespace) -> MetricConfig:
-    return MetricConfig(
+    return apply_census_runtime_profile(MetricConfig(
         dataset_name=args.dataset_name,
         exp_name=args.exp_name,
         artifact_dir=args.artifact_dir,
@@ -57,7 +61,9 @@ def config_from_args(args: argparse.Namespace) -> MetricConfig:
         nn_query_batch_size=args.nn_query_batch_size,
         nn_reference_chunk_size=args.nn_reference_chunk_size,
         utility_exact_evaluator=args.utility_exact_evaluator,
-    )
+        dcr_repeats=args.dcr_repeats,
+        dcr_cap=args.dcr_cap,
+    ))
 
 
 def main() -> None:
