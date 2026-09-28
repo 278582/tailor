@@ -1,0 +1,606 @@
+{
+  "schema_version": "llm_mcts_dataset_context_v2_compact",
+  "dataset": "us_census_data_1990",
+  "task_type": "binclass",
+  "target_column": "poverty",
+  "rows": {
+    "train": 1000000,
+    "test": 111112,
+    "val": 0
+  },
+  "columns": {
+    "feature": [
+      "dAge",
+      "dHour89",
+      "dWeek89",
+      "dTravtime",
+      "dIncome1",
+      "dRpincome",
+      "iSex",
+      "iMarital",
+      "iRelat1",
+      "iYearsch",
+      "iSchool",
+      "iFertil",
+      "iCitizen",
+      "dPOB",
+      "iImmigr",
+      "dAncstry1",
+      "dHispanic",
+      "iLang1",
+      "iEnglish",
+      "iClass",
+      "dIndustry",
+      "dOccup",
+      "iRlabor",
+      "iYearwrk",
+      "iWorklwk",
+      "iMeans",
+      "dIncome4",
+      "dIncome5",
+      "iDisabl1",
+      "iMobillim",
+      "iMilitary",
+      "iMobility"
+    ],
+    "num": [
+      "dAge",
+      "dHour89",
+      "dWeek89",
+      "dTravtime",
+      "dIncome1",
+      "dRpincome"
+    ],
+    "cat": [
+      "iSex",
+      "iMarital",
+      "iRelat1",
+      "iYearsch",
+      "iSchool",
+      "iFertil",
+      "iCitizen",
+      "dPOB",
+      "iImmigr",
+      "dAncstry1",
+      "dHispanic",
+      "iLang1",
+      "iEnglish",
+      "iClass",
+      "dIndustry",
+      "dOccup",
+      "iRlabor",
+      "iYearwrk",
+      "iWorklwk",
+      "iMeans",
+      "dIncome4",
+      "dIncome5",
+      "iDisabl1",
+      "iMobillim",
+      "iMilitary",
+      "iMobility"
+    ],
+    "discrete_num": [
+      "dAge",
+      "dHour89",
+      "dWeek89",
+      "dTravtime",
+      "dIncome1",
+      "dRpincome"
+    ],
+    "privacy_configured": [
+      "dAge",
+      "iSex",
+      "iMarital",
+      "dPOB",
+      "iCitizen"
+    ],
+    "privacy_domain": [
+      "iRelat1",
+      "iImmigr",
+      "dAncstry1",
+      "dHispanic",
+      "iLang1",
+      "iEnglish",
+      "iFertil",
+      "iYearsch",
+      "iMilitary",
+      "iMobility"
+    ]
+  },
+  "target_summary": {
+    "minority": "1",
+    "utility_notes": [
+      "preserve positive-class poverty=1 coverage; about 16% of train rows are in poverty and this minority class is the key utility signal",
+      "dIncome1, dRpincome, iYearsch, dOccup, and dHour89 are the strongest poverty predictors",
+      "worker class, industry, labor-force status, and household relation carry additional poverty structure that should not be dropped from utility scope"
+    ]
+  },
+  "theta_guidance": {
+    "shape_priority": [
+      "dIncome1",
+      "dRpincome",
+      "dHour89",
+      "dWeek89",
+      "dAge",
+      "dTravtime",
+      "iYearsch",
+      "dOccup",
+      "dIndustry",
+      "iClass",
+      "iRlabor",
+      "iMarital"
+    ],
+    "trend_priority": [
+      "dAge",
+      "dIncome1",
+      "dHour89",
+      "dWeek89",
+      "iYearsch",
+      "dOccup",
+      "dIndustry",
+      "iClass",
+      "iMarital",
+      "iSex",
+      "iCitizen",
+      "dPOB",
+      "iRlabor",
+      "iYearwrk"
+    ],
+    "privacy_priority": [
+      "dAge",
+      "iSex",
+      "iMarital",
+      "dPOB",
+      "iCitizen",
+      "iRelat1",
+      "iImmigr",
+      "dAncstry1",
+      "dHispanic",
+      "iLang1",
+      "iEnglish",
+      "iFertil",
+      "iYearsch",
+      "iMilitary",
+      "iMobility"
+    ],
+    "utility_priority": [
+      "dIncome1",
+      "dRpincome",
+      "iYearsch",
+      "dOccup",
+      "dHour89",
+      "dIndustry",
+      "iClass",
+      "iRlabor",
+      "dAge",
+      "iMarital",
+      "dWeek89",
+      "dTravtime",
+      "iCitizen",
+      "iSex"
+    ]
+  },
+  "pair_priors": [
+    [
+      "dAge",
+      "dIncome1",
+      "earnings and poverty risk shift strongly with age band"
+    ],
+    [
+      "dHour89",
+      "dWeek89",
+      "hours and weeks worked in 1989 jointly describe labor supply"
+    ],
+    [
+      "dHour89",
+      "dIncome1",
+      "hours worked constrain feasible personal income"
+    ],
+    [
+      "iYearsch",
+      "dOccup",
+      "schooling constrains the realistic occupation pool"
+    ],
+    [
+      "dOccup",
+      "dIndustry",
+      "occupation and industry are tightly coupled job-market codes"
+    ],
+    [
+      "iClass",
+      "dOccup",
+      "class of worker constrains feasible occupations"
+    ],
+    [
+      "iCitizen",
+      "dPOB",
+      "citizenship and place of birth must stay demographically coherent"
+    ],
+    [
+      "iImmigr",
+      "iCitizen",
+      "immigration recency and citizenship status are dependent"
+    ],
+    [
+      "iLang1",
+      "iEnglish",
+      "language spoken and English proficiency should remain consistent"
+    ],
+    [
+      "iMarital",
+      "iRelat1",
+      "marital status and household relationship labels are strongly dependent"
+    ],
+    [
+      "iSex",
+      "iRelat1",
+      "some household-relationship labels are sex-marked"
+    ],
+    [
+      "iRlabor",
+      "iYearwrk",
+      "labor-force status and year last worked should stay coherent"
+    ],
+    [
+      "iWorklwk",
+      "dHour89",
+      "worked-last-week flag should align with hours worked"
+    ],
+    [
+      "iMeans",
+      "dTravtime",
+      "commute mode and travel time form a transportation pair"
+    ],
+    [
+      "dIncome1",
+      "dRpincome",
+      "personal and related-person income share household-earnings structure"
+    ],
+    [
+      "dIncome4",
+      "dIncome5",
+      "auxiliary income codes share sparse/nonzero reporting behavior"
+    ],
+    [
+      "iDisabl1",
+      "iMobillim",
+      "disability and mobility limitation jointly describe functional status"
+    ],
+    [
+      "dAge",
+      "iMarital",
+      "marital-status mix shifts strongly with age"
+    ]
+  ],
+  "risks": {
+    "shape": [
+      "dIncome1 and dRpincome are discrete binned earnings; synthetic data can flatten high-income bins or oversample zeros",
+      "dHour89, dWeek89, and dTravtime are discrete labor/commute bins that should remain nonnegative and integer-like",
+      "dAge is a coarse age bin, not a raw year; treating it as a unique fingerprint is still a privacy risk",
+      "many categoricals (dPOB, dAncstry1, dOccup, dIndustry, iImmigr) have rare codes that are easy to drop or amplify"
+    ],
+    "trend": [
+      "hours/weeks/income triples must stay labor-supply coherent",
+      "citizenship vs place of birth and language vs English proficiency must not form impossible combinations",
+      "occupation/industry/class-of-worker combinations should not be sampled independently",
+      "marital status vs household relationship must stay coherent, including sex-marked labels"
+    ],
+    "privacy": [
+      "configured privacy columns are dAge, iSex, iMarital, dPOB, and iCitizen, following the adult-style quasi-identifier pattern",
+      "(dAge, iSex, iMarital, dPOB, iCitizen) plus ancestry/language/immigration context can become a strong nearest-neighbor handle",
+      "rare place-of-birth, ancestry, and immigration codes are high-risk identifiers when paired with age and sex",
+      "current code-derived bounds require broad col_ps for 32 features, but col_ps must not include the target and should not copy the entire feature set"
+    ],
+    "utility": [
+      "dropping dIncome1 or iYearsch from utility scope substantially weakens poverty classification",
+      "poverty=1 is the minority class at about 16%; synthetic data should preserve positive-class coverage",
+      "occupation, industry, hours, and labor-force status jointly carry employment-related poverty signal",
+      "col_u should usually be dIncome1, iYearsch, dOccup, dHour89, or dRpincome; never use the target column"
+    ]
+  },
+  "seed_theta_examples": [
+    {
+      "family": "fidelity_heavy",
+      "theta": {
+        "col_1ds": [
+          "poverty",
+          "dAge",
+          "dHour89",
+          "dWeek89",
+          "dTravtime",
+          "dIncome1",
+          "dRpincome",
+          "iYearsch",
+          "dOccup",
+          "dIndustry",
+          "iClass",
+          "iMarital",
+          "iSex",
+          "dPOB",
+          "iCitizen",
+          "iRlabor",
+          "iEnglish"
+        ],
+        "col_2ds": [
+          "dAge",
+          "dIncome1",
+          "dHour89",
+          "dWeek89",
+          "dOccup",
+          "dIndustry",
+          "iYearsch",
+          "iClass",
+          "iMarital",
+          "iSex",
+          "dPOB",
+          "iCitizen",
+          "iRlabor",
+          "iYearwrk",
+          "dTravtime",
+          "iEnglish",
+          "iLang1"
+        ],
+        "col_ps": [
+          "dAge",
+          "dHour89",
+          "dWeek89",
+          "dTravtime",
+          "dIncome1",
+          "dRpincome",
+          "iSex",
+          "iMarital",
+          "iRelat1",
+          "iYearsch",
+          "iSchool",
+          "iFertil",
+          "iCitizen",
+          "dPOB",
+          "iImmigr",
+          "dAncstry1",
+          "dHispanic",
+          "iLang1",
+          "iEnglish",
+          "iClass",
+          "dIndustry",
+          "dOccup",
+          "iRlabor",
+          "iYearwrk",
+          "dIncome4",
+          "dIncome5",
+          "iMilitary",
+          "iMobility"
+        ],
+        "col_u": "dIncome1"
+      },
+      "prior_score": 0.8,
+      "reason": "preserves high-risk earnings, labor-supply, schooling, occupation, and configured demographic privacy columns while omitting commute-mode and disability fields from this privacy scope"
+    },
+    {
+      "family": "trend_heavy",
+      "theta": {
+        "col_1ds": [
+          "dAge",
+          "dIncome1",
+          "dHour89",
+          "dWeek89",
+          "iYearsch",
+          "dOccup",
+          "dIndustry",
+          "iClass",
+          "iMarital",
+          "iSex",
+          "iCitizen",
+          "dPOB",
+          "iRlabor",
+          "iYearwrk",
+          "iLang1",
+          "iEnglish",
+          "iRelat1"
+        ],
+        "col_2ds": [
+          "poverty",
+          "dAge",
+          "dIncome1",
+          "dHour89",
+          "dWeek89",
+          "iYearsch",
+          "dOccup",
+          "dIndustry",
+          "iClass",
+          "iMarital",
+          "iSex",
+          "iCitizen",
+          "dPOB",
+          "iRlabor",
+          "iYearwrk",
+          "iLang1",
+          "iEnglish"
+        ],
+        "col_ps": [
+          "dAge",
+          "dHour89",
+          "dWeek89",
+          "dTravtime",
+          "dIncome1",
+          "dRpincome",
+          "iSex",
+          "iMarital",
+          "iRelat1",
+          "iYearsch",
+          "iFertil",
+          "iCitizen",
+          "dPOB",
+          "iImmigr",
+          "dAncstry1",
+          "dHispanic",
+          "iLang1",
+          "iEnglish",
+          "iClass",
+          "dIndustry",
+          "dOccup",
+          "iRlabor",
+          "iYearwrk",
+          "iWorklwk",
+          "iMeans",
+          "iMilitary",
+          "iMobility"
+        ],
+        "col_u": "dHour89"
+      },
+      "prior_score": 0.78,
+      "reason": "focuses col_2ds on labor-supply, occupation-industry, citizenship-birthplace, and language-proficiency dependency groups; col_ps omits disability and auxiliary income codes instead of copying the fidelity scope"
+    },
+    {
+      "family": "privacy_aware",
+      "theta": {
+        "col_1ds": [
+          "dAge",
+          "iSex",
+          "iMarital",
+          "dPOB",
+          "iCitizen",
+          "iRelat1",
+          "iImmigr",
+          "dAncstry1",
+          "dHispanic",
+          "iLang1",
+          "iEnglish",
+          "iFertil",
+          "iYearsch",
+          "iMilitary",
+          "iMobility",
+          "iSchool",
+          "dIncome1"
+        ],
+        "col_2ds": [
+          "dAge",
+          "iSex",
+          "iMarital",
+          "dPOB",
+          "iCitizen",
+          "iRelat1",
+          "iImmigr",
+          "dAncstry1",
+          "iLang1",
+          "iEnglish",
+          "iYearsch",
+          "dOccup",
+          "dIndustry",
+          "dHour89",
+          "dIncome1",
+          "iMilitary",
+          "iMobility"
+        ],
+        "col_ps": [
+          "dAge",
+          "dHour89",
+          "dWeek89",
+          "dTravtime",
+          "dIncome1",
+          "dRpincome",
+          "iSex",
+          "iMarital",
+          "iRelat1",
+          "iYearsch",
+          "iSchool",
+          "iFertil",
+          "iCitizen",
+          "dPOB",
+          "iImmigr",
+          "dAncstry1",
+          "dHispanic",
+          "iLang1",
+          "iEnglish",
+          "iClass",
+          "dIndustry",
+          "dOccup",
+          "iRlabor",
+          "iYearwrk",
+          "dIncome4",
+          "dIncome5",
+          "iMilitary",
+          "iMobility",
+          "iDisabl1",
+          "iMobillim"
+        ],
+        "col_u": "iYearsch"
+      },
+      "prior_score": 0.76,
+      "reason": "uses the broadest census col_ps across configured quasi-identifiers plus ancestry, language, immigration, and related demographic fingerprint columns; col_1ds is intentionally privacy-fingerprint focused rather than a copy of fidelity"
+    },
+    {
+      "family": "utility_aware",
+      "theta": {
+        "col_1ds": [
+          "poverty",
+          "dIncome1",
+          "dRpincome",
+          "iYearsch",
+          "dOccup",
+          "dHour89",
+          "dIndustry",
+          "iClass",
+          "iRlabor",
+          "dAge",
+          "iMarital",
+          "dWeek89",
+          "dTravtime",
+          "iCitizen",
+          "iSex",
+          "iYearwrk",
+          "iWorklwk"
+        ],
+        "col_2ds": [
+          "dIncome1",
+          "dRpincome",
+          "iYearsch",
+          "dOccup",
+          "dHour89",
+          "dIndustry",
+          "iClass",
+          "iRlabor",
+          "dAge",
+          "iMarital",
+          "dWeek89",
+          "iCitizen",
+          "dPOB",
+          "iSex",
+          "iYearwrk",
+          "iWorklwk",
+          "dTravtime"
+        ],
+        "col_ps": [
+          "dAge",
+          "dHour89",
+          "dWeek89",
+          "dTravtime",
+          "dIncome1",
+          "dRpincome",
+          "iSex",
+          "iMarital",
+          "iRelat1",
+          "iYearsch",
+          "iSchool",
+          "iCitizen",
+          "dPOB",
+          "iImmigr",
+          "dAncstry1",
+          "dHispanic",
+          "iLang1",
+          "iEnglish",
+          "iClass",
+          "dIndustry",
+          "dOccup",
+          "iRlabor",
+          "iYearwrk",
+          "iWorklwk",
+          "iMeans",
+          "iMilitary"
+        ],
+        "col_u": "dOccup"
+      },
+      "prior_score": 0.82,
+      "reason": "anchors utility on income, schooling, occupation, hours, and labor-force status while keeping configured demographic QIDs in privacy scope; target may appear in col_1ds but never in col_ps"
+    }
+  ]
+}
