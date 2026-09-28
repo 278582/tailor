@@ -49,9 +49,9 @@ in this repository:
 
 ```text
 third_party/TabDiff/data/{dataset}/info.json
-third_party/TabDiff/synthetic/{dataset}/real.csv
-third_party/TabDiff/synthetic/{dataset}/test.csv
-third_party/TabDiff/synthetic/{dataset}/val.csv        # optional
+synthetic/{dataset}/train.csv
+synthetic/{dataset}/test.csv
+synthetic/{dataset}/hold.csv        
 third_party/sample/{source}/{dataset}/sample_*.csv
 prompt_pack/dataset_contexts/{dataset}.prompt_context.json
 ```
@@ -103,15 +103,15 @@ versions/selection_pareto.csv  # pareto-like version
 
 Adult with a pre-generated TabDiff(or others) sample:
 
-```bash
+```
 python -m post_selection_tool.cli \
   --synthetic-csv third_party/sample/{model}/adult/sample_0.csv \
   --dataset-name adult \
   --exp-name adult_ps \
   --artifact-dir artifacts/postprocess/{model}/adult \
   --source ${model} \
-  --keep-k 32561 \
-  --preselect-target 45585 \
+  --keep-k 29305 \
+  --preselect-target 41027 \
   --d-cur-size 2000 \
   --density-reference-size 5000 \
   --theta-source final \
@@ -212,32 +212,6 @@ The final selected theta and table are in:
 ```text
 final/theta_star.json
 final/final_pareto.csv  # pareto-like version
-```
-
-LLM-backed run in all process:
-
-```bash
-python -m llm_mcts_tool.v2_cli \
-  --dataset-name adult \
-  --artifact-dir artifacts/llm_mcts_v2/adult \
-  --exp-name adult_lm \
-  --mode single \
-  --single-source tabdiff \
-  --provider llm \
-  --mcts-budget 50 \
-  --theta-proposals-per-event 4 \
-  --keep-k 32561 \
-  --preselect-target 45585 \
-  --d-cur-size 2000 \
-  --density-reference-size 5000 \
-  --direct-dcr-repair-v19-target-margin 0.03 \
-  --direct-dcr-repair-v19-max-swap-fraction 0.30 \
-  --direct-dcr-repair-v19-candidate-neighbors 64 \
-  --privacy-version v2 \
-  --eval-device cpu \
-  --nn-device cpu \
-  --utility-exact-evaluator torch_lightweight_mlp \
-  --disable-progress
 ```
 
 ## Reuse a Found Theta
