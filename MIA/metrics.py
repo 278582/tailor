@@ -4,8 +4,17 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import average_precision_score, balanced_accuracy_score, precision_recall_curve, roc_auc_score
 from sklearn.metrics import roc_curve
+
+SUMMARY_METRIC_COLUMNS = (
+    "auroc",
+    "attack_advantage",
+    "tpr_at_fpr_1pct",
+    "tpr_at_fpr_5pct",
+    "tpr_at_fpr_10pct",
+)
 
 
 @dataclass(frozen=True)
@@ -91,6 +100,24 @@ def _tpr_at_fpr(fpr: np.ndarray, tpr: np.ndarray, limit: float) -> float:
     if not np.any(mask):
         return 0.0
     return float(np.max(tpr[mask]))
+
+
+def summarize_metric_mean_variance(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    mean_row: dict[str, Any] = {"stat": "mean"}
+    variance_row: dict[str, Any] = {"stat": "variance"}
+    for column in SUMMARY_METRIC_COLUMNS:
+        if column not in metrics_df.columns:
+            mean_row[column] = None
+            variance_row[column] = None
+            continue
+        values = pd.to_numeric(metrics_df[column], errors="coerce").dropna()
+        if values.empty:
+            mean_row[column] = None
+            variance_row[column] = None
+            continue
+        mean_row[column] = float(values.mean())
+        variance_row[column] = float(values.var(ddof=1)) if len(values) > 1 else 0.0
+    return pd.DataFrame([mean_row, variance_row], columns=["stat", *SUMMARY_METRIC_COLUMNS])
 
 
 def best_attack(metrics: list[dict[str, Any]]) -> dict[str, Any] | None:

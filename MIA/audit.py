@@ -26,7 +26,7 @@ from .io import (
     save_json,
     selection_name_from_path,
 )
-from .metrics import best_attack, summarize_binary_scores
+from .metrics import best_attack, summarize_binary_scores, summarize_metric_mean_variance
 
 
 @dataclass
@@ -93,6 +93,7 @@ def audit_run(
     metrics_df = pd.DataFrame(metric_rows)
     if not metrics_df.empty:
         save_csv(Path(out_dir) / "metrics.csv", metrics_df)
+        save_csv(Path(out_dir) / "metrics_summary.csv", summarize_metric_mean_variance(metrics_df))
     summary = {
         "run_dir": str(run_dir),
         "out_dir": str(out_dir),

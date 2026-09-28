@@ -23,8 +23,8 @@ risk for each synthetic selection.
 ## Environment
 
 ```bash
-/*/miniconda3/bin/conda create -n MIA --override-channels -c conda-forge python=3.10 -y
-/*/miniconda3/bin/conda install -n MIA --override-channels -c conda-forge \
+/mnt/lustre/liuzhiwei/miniconda3/bin/conda create -n MIA --override-channels -c conda-forge python=3.10 -y
+/mnt/lustre/liuzhiwei/miniconda3/bin/conda install -n MIA --override-channels -c conda-forge \
   numpy pandas scipy scikit-learn joblib tqdm xgboost pytest matplotlib seaborn -y
 ```
 
@@ -36,23 +36,23 @@ require it. Install it separately only when the current pip index is reachable.
 Audit all selections in a postprocess run:
 
 ```bash
-/*/miniconda3/bin/conda run -n MIA \
+/mnt/lustre/liuzhiwei/miniconda3/bin/conda run -n MIA \
   python -m MIA.cli \
-  --run-dir [input dir] \
+  --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
   --all-selections \
-  --out-dir [output dir]
+  --out-dir MIA/results/news_no_theta_1_2
 ```
 
 For quick scans on large tables, add row caps such as:
 
 ```bash
 python -m MIA.cli \
-  --run-dir [input dir] \
-  --selection-name [method] \
+  --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
+  --selection-name pareto \
   --max-member-rows 5000 \
   --max-nonmember-rows 5000 \
   --max-synthetic-rows 5000 \
-  --out-dir MIA/results/[dir]
+  --out-dir MIA/results/news_quick_pareto
 ```
 
 Audit one explicit synthetic CSV:
@@ -62,7 +62,7 @@ python -m MIA.cli \
   --train-csv path/to/eval_train.csv \
   --control-csv path/to/eval_holdout.csv \
   --reference-csv path/to/eval_test.csv \
-  --synthetic-csv path/to/selection_[method].csv \
+  --synthetic-csv path/to/selection_pareto.csv \
   --out-dir MIA/results/example
 ```
 
@@ -70,16 +70,17 @@ Add shadow runs when available:
 
 ```bash
 python -m MIA.cli \
-  --run-dir [input dir] \
-  --selection-name [method] \
-  --shadow-run-dir [input dir] \
-  --shadow-run-dir [input dir] \
-  --out-dir [output dir]
+  --run-dir artifacts/postprocess/tabsyn/news/no_theta_1_2 \
+  --selection-name pareto \
+  --shadow-run-dir artifacts/postprocess/tabsyn/news/no_theta_0_1 \
+  --shadow-run-dir artifacts/postprocess/tabsyn/news/no_theta_3_1 \
+  --out-dir MIA/results/news_shadow_pareto
 ```
 
 ## Outputs
 
 - `summary.json`: metrics and best attack per selection.
 - `metrics.csv`: flat comparison table across selections.
+- `metrics_summary.csv`: mean and sample variance of AUROC, attack advantage, and TPR@FPR metrics.
 - `<selection>/scores.csv`: per-row labels and attack scores.
 - `<selection>/attack_details.json`: method metadata and diagnostics.
