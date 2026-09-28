@@ -4,6 +4,11 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from metric_tool.aligned_dcr import (
+    DEFAULT_DCR_REPEATS,
+    DEFAULT_DCR_SEED,
+    row_signals_from_matrices,
+)
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import OneHotEncoder
 
@@ -139,18 +144,26 @@ def _row_dcr_signal(
         cat_weight=cat_weight,
         encoder=encoder,
     )
-    train_nn = NearestNeighbors(n_neighbors=1, metric="manhattan", algorithm="auto")
-    test_nn = NearestNeighbors(n_neighbors=1, metric="manhattan", algorithm="auto")
-    train_nn.fit(train_matrix)
-    test_nn.fit(test_matrix)
-    dcr_real = train_nn.kneighbors(pool_matrix, return_distance=True)[0][:, 0]
-    dcr_test = test_nn.kneighbors(pool_matrix, return_distance=True)[0][:, 0]
+    aligned = row_signals_from_matrices(
+        pool_matrix,
+        train_matrix,
+        test_matrix,
+        repeats=int(schema_card.get("dcr_repeats", DEFAULT_DCR_REPEATS)),
+        cap=int(schema_card.get("dcr_cap", 0) or 0),
+        seed=int(schema_card.get("dcr_seed", DEFAULT_DCR_SEED)),
+    )
     return {
         "features": pool_matrix,
-        "dcr_real": np.asarray(dcr_real, dtype=float),
-        "dcr_test": np.asarray(dcr_test, dtype=float),
-        "is_real_closer": np.asarray(dcr_real < dcr_test, dtype=bool),
-        "margin": np.asarray(dcr_test - dcr_real, dtype=float),
+        "dcr_real": np.asarray(aligned["dcr_real"], dtype=float),
+        "dcr_test": np.asarray(aligned["dcr_test"], dtype=float),
+        "is_real_closer": np.asarray(aligned["is_real_closer"], dtype=bool),
+        "margin": np.asarray(aligned["margin"], dtype=float),
+        "aligned_closer_rate": np.asarray(aligned["aligned_closer_rate"], dtype=float),
+        "dcr_n": int(aligned["dcr_n"]),
+        "dcr_repeats": int(aligned["dcr_repeats"]),
+        "dcr_aligned": True,
+        "dcr_align_mode": str(aligned.get("dcr_align_mode", "paired_nn_coreset")),
+        "dcr_cap": int(aligned.get("dcr_cap", 0) or 0),
         "signal_column_order": signal_column_order,
         "signal_column_count": int(len(signal_column_order)),
         "signal_column_source": str(schema_card.get("dcr_signal_column_source", "full_column_order")),

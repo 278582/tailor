@@ -27,6 +27,13 @@ def configure_logging(*, log_file: Path | None = None, quiet: bool = False) -> l
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+
+        def _flush_emit(record: logging.LogRecord, _emit=file_handler.emit) -> None:
+            _emit(record)
+            file_handler.flush()
+
+        file_handler.emit = _flush_emit  # type: ignore[method-assign]
         logger.addHandler(file_handler)
 
     if not logger.handlers:

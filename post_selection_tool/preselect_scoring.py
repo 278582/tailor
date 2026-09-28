@@ -5,7 +5,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .census_profile import is_census_dataset, resolve_preselect_batch_size
 from .encoding import _progress, _rank_normalize
+from .logging_utils import get_logger
 
 
 class PreselectScoringMixin:
@@ -15,9 +17,10 @@ class PreselectScoringMixin:
         show_progress: bool = False,
         progress_desc: str = "surrogate scoring",
         candidate_ids: np.ndarray | list[int] | None = None,
-    ) -> list[dict[str, Any]]:
+        return_frame: bool = False,
+    ) -> list[dict[str, Any]] | pd.DataFrame:
         if valid_df.empty:
-            return []
+            return pd.DataFrame() if return_frame else []
         normalized_df = valid_df.reset_index(drop=True)
         if candidate_ids is None:
             candidate_ids_array = np.arange(len(normalized_df), dtype=int)
@@ -93,6 +96,8 @@ class PreselectScoringMixin:
                 ),
             }
         )
+        if return_frame:
+            return surrogate_df
         return surrogate_df.to_dict(orient="records")
 
     def _build_preselect_quota_targets(
@@ -176,7 +181,10 @@ class PreselectScoringMixin:
         batch_score_static = np.zeros(total_rows, dtype=float)
         batch_score_final = np.zeros(total_rows, dtype=float)
 
-        batch_size = max(128, min(1536, int(round(target_preselect / 24.0))))
+        batch_size = resolve_preselect_batch_size(
+            target_preselect,
+            str(getattr(self, "schema_card", {}).get("dataset", "")),
+        )
         remaining_target = int(target_preselect)
         num_batches = int(np.ceil(target_preselect / max(batch_size, 1)))
 
@@ -186,6 +194,40 @@ class PreselectScoringMixin:
         w_quota = max(0.0, 1.0 - w_priv - w_support - w_static)
         w_quota_1d = 0.5 * w_quota
         w_quota_2d = 0.5 * w_quota
+
+        dataset_name = str(getattr(self, "schema_card", {}).get("dataset", ""))
+        log_quota = is_census_dataset(dataset_name) and target_preselect >= 50_000
+        if log_quota:
+            get_logger().info(
+                "[preselect] quota fill start rows=%d target=%d batch_size=%d num_batches=%d desc=%s",
+                total_rows,
+                target_preselect,
+                batch_size,
+                num_batches,
+                progress_desc,
+            )
+
+        from .preselect_gpu import CensusGpuQuotaEngine, should_use_census_gpu_preselect
+
+        gpu_engine = None
+        if should_use_census_gpu_preselect(self, total_rows):
+            gpu_engine = CensusGpuQuotaEngine.build(
+                selector=self,
+                bucket_indices=bucket_indices,
+                pair_codes=pair_codes,
+                selected_counts_1d=selected_counts_1d,
+                quota_targets_1d=quota_targets_1d,
+                selected_counts_2d=selected_counts_2d,
+                quota_targets_2d=quota_targets_2d,
+                base_score=base_score,
+                support_tiebreak=support_tiebreak,
+                privacy_tiebreak=privacy_tiebreak,
+                w_quota_1d=w_quota_1d,
+                w_quota_2d=w_quota_2d,
+                w_static=w_static,
+                w_support=w_support,
+                w_priv=w_priv,
+            )
 
         batch_iter = _progress(
             range(num_batches),
@@ -197,64 +239,104 @@ class PreselectScoringMixin:
             if remaining_target <= 0:
                 break
 
-            _, add_support_1d = self._target_count_support_scores_1d(
-                bucket_indices,
-                selected_counts_1d,
-                quota_targets_1d,
-            )
-            _, add_support_2d = self._target_count_support_scores_2d(
-                pair_codes,
-                selected_counts_2d,
-                quota_targets_2d,
-            )
-            if add_support_1d.size == 0:
-                add_support_1d = np.zeros(total_rows, dtype=float)
-            if add_support_2d.size == 0:
-                add_support_2d = np.zeros(total_rows, dtype=float)
-
-            final_score = (
-                w_quota_1d * add_support_1d
-                + w_quota_2d * add_support_2d
-                + w_static * base_score
-                + w_support * support_tiebreak
-                + w_priv * privacy_tiebreak
-            )
-            final_score[selected_mask] = -np.inf
-
-            available_indices = np.flatnonzero(~selected_mask)
-            if available_indices.size == 0:
+            available_count = int(total_rows - np.count_nonzero(selected_mask))
+            if available_count <= 0:
                 break
-            take_k = min(int(remaining_target), int(batch_size), int(available_indices.size))
+            take_k = min(int(remaining_target), int(batch_size), available_count)
             if take_k <= 0:
                 break
-            if available_indices.size <= take_k:
-                chosen = available_indices
-            else:
-                local_scores = final_score[available_indices]
-                top_local = np.argpartition(-local_scores, take_k - 1)[:take_k]
-                chosen = available_indices[top_local]
-            chosen = chosen[
-                np.lexsort(
+
+            if gpu_engine is not None:
+                chosen, add_1d_chosen, add_2d_chosen, final_chosen = gpu_engine.choose_batch(
+                    selected_counts_1d=selected_counts_1d,
+                    quota_targets_1d=quota_targets_1d,
+                    selected_counts_2d=selected_counts_2d,
+                    quota_targets_2d=quota_targets_2d,
+                    columns=list(self.fidelity_columns),
+                    take_k=take_k,
+                )
+                if chosen.size == 0:
+                    break
+                order = np.lexsort(
                     (
                         chosen,
                         -support_tiebreak[chosen],
                         -privacy_tiebreak[chosen],
                         -base_score[chosen],
-                        -add_support_2d[chosen],
-                        -add_support_1d[chosen],
-                        -final_score[chosen],
+                        -add_2d_chosen,
+                        -add_1d_chosen,
+                        -final_chosen,
                     )
                 )
-            ]
+                chosen = chosen[order]
+                add_1d_chosen = add_1d_chosen[order]
+                add_2d_chosen = add_2d_chosen[order]
+                final_chosen = final_chosen[order]
+                selected_mask[chosen] = True
+                gpu_engine.mark_selected(chosen)
+                batch_id[chosen] = int(current_batch)
+                batch_score_1d[chosen] = add_1d_chosen
+                batch_score_2d[chosen] = add_2d_chosen
+                batch_score_priv[chosen] = privacy_tiebreak[chosen]
+                batch_score_support[chosen] = support_tiebreak[chosen]
+                batch_score_static[chosen] = base_score[chosen]
+                batch_score_final[chosen] = final_chosen
+            else:
+                _, add_support_1d = self._target_count_support_scores_1d(
+                    bucket_indices,
+                    selected_counts_1d,
+                    quota_targets_1d,
+                )
+                _, add_support_2d = self._target_count_support_scores_2d(
+                    pair_codes,
+                    selected_counts_2d,
+                    quota_targets_2d,
+                )
+                if add_support_1d.size == 0:
+                    add_support_1d = np.zeros(total_rows, dtype=float)
+                if add_support_2d.size == 0:
+                    add_support_2d = np.zeros(total_rows, dtype=float)
 
-            selected_mask[chosen] = True
-            batch_id[chosen] = int(current_batch)
-            batch_score_1d[chosen] = add_support_1d[chosen]
-            batch_score_2d[chosen] = add_support_2d[chosen]
-            batch_score_priv[chosen] = privacy_tiebreak[chosen]
-            batch_score_support[chosen] = support_tiebreak[chosen]
-            batch_score_static[chosen] = base_score[chosen]
-            batch_score_final[chosen] = final_score[chosen]
+                final_score = (
+                    w_quota_1d * add_support_1d
+                    + w_quota_2d * add_support_2d
+                    + w_static * base_score
+                    + w_support * support_tiebreak
+                    + w_priv * privacy_tiebreak
+                )
+                final_score[selected_mask] = -np.inf
+
+                available_indices = np.flatnonzero(~selected_mask)
+                if available_indices.size == 0:
+                    break
+                if available_indices.size <= take_k:
+                    chosen = available_indices
+                else:
+                    local_scores = final_score[available_indices]
+                    top_local = np.argpartition(-local_scores, take_k - 1)[:take_k]
+                    chosen = available_indices[top_local]
+                chosen = chosen[
+                    np.lexsort(
+                        (
+                            chosen,
+                            -support_tiebreak[chosen],
+                            -privacy_tiebreak[chosen],
+                            -base_score[chosen],
+                            -add_support_2d[chosen],
+                            -add_support_1d[chosen],
+                            -final_score[chosen],
+                        )
+                    )
+                ]
+
+                selected_mask[chosen] = True
+                batch_id[chosen] = int(current_batch)
+                batch_score_1d[chosen] = add_support_1d[chosen]
+                batch_score_2d[chosen] = add_support_2d[chosen]
+                batch_score_priv[chosen] = privacy_tiebreak[chosen]
+                batch_score_support[chosen] = support_tiebreak[chosen]
+                batch_score_static[chosen] = base_score[chosen]
+                batch_score_final[chosen] = final_score[chosen]
 
             for column in self.fidelity_columns:
                 self._add_code_count_delta(selected_counts_1d[column], bucket_indices[column][chosen], 1)
@@ -263,6 +345,14 @@ class PreselectScoringMixin:
                 self._add_code_count_delta(selected_counts_2d[pair_idx], codes[chosen], 1)
 
             remaining_target -= int(len(chosen))
+            if log_quota and (current_batch == 0 or (current_batch + 1) % 5 == 0 or remaining_target <= 0):
+                get_logger().info(
+                    "[preselect] quota fill batch=%d/%d remaining=%d gpu=%s",
+                    current_batch + 1,
+                    num_batches,
+                    remaining_target,
+                    gpu_engine is not None,
+                )
             if hasattr(batch_iter, "set_postfix"):
                 batch_iter.set_postfix(batch=current_batch, remaining=remaining_target)
 
@@ -282,6 +372,14 @@ class PreselectScoringMixin:
             batch_scale=0.003,
         )
 
+        gpu_used = gpu_engine is not None
+        if gpu_engine is not None:
+            del gpu_engine
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         return {
             "selected_mask": selected_mask,
             "keep_indices": np.sort(np.flatnonzero(selected_mask).astype(int, copy=False)),
@@ -297,6 +395,7 @@ class PreselectScoringMixin:
             "batch_size": int(batch_size),
             "num_batches": int(num_batches),
             "privacy_weight": float(w_priv),
+            "gpu_quota_fill": gpu_used,
             "target_mode": target_mode,
             "refine_report": refine_report,
         }
@@ -385,12 +484,126 @@ class PreselectScoringMixin:
             record["preselect_target_source"] = target_source
             record["preselect_refine_applied"] = bool(refine_applied)
 
+    def _surrogate_score_array(
+        self,
+        surrogate_records: list[dict[str, Any]],
+        keys: tuple[str, ...],
+        *,
+        surrogate_df: pd.DataFrame | None = None,
+        total_rows: int,
+    ) -> np.ndarray:
+        if surrogate_df is not None:
+            for key in keys:
+                if key in surrogate_df.columns:
+                    return surrogate_df[key].to_numpy(dtype=float, copy=False)
+            return np.zeros(total_rows, dtype=float)
+        if not surrogate_records:
+            return np.zeros(total_rows, dtype=float)
+        primary = keys[0]
+        fallbacks = keys[1:]
+        values = []
+        for record in surrogate_records:
+            value = record.get(primary)
+            if value is None:
+                for key in fallbacks:
+                    value = record.get(key)
+                    if value is not None:
+                        break
+            values.append(0.0 if value is None else float(value))
+        return np.asarray(values, dtype=float)
+
+    def _candidate_frame_from_records(
+        self,
+        valid_records: list[dict[str, Any]],
+        candidate_df: pd.DataFrame | None,
+    ) -> pd.DataFrame:
+        if candidate_df is None:
+            return pd.DataFrame([record["row"] for record in valid_records], columns=self.column_order)
+        frame = candidate_df.reset_index(drop=True)
+        if len(frame) != len(valid_records):
+            raise ValueError(
+                f"candidate_df length mismatch: got {len(frame)} rows for {len(valid_records)} records."
+            )
+        return frame
+
+    def _slice_preselect_outputs(
+        self,
+        *,
+        valid_records: list[dict[str, Any]],
+        surrogate_records: list[dict[str, Any]],
+        keep_indices: np.ndarray,
+        annotate_all: bool,
+        selected_mask: np.ndarray,
+        band_mask: np.ndarray,
+        batch_id: np.ndarray,
+        batch_score_1d: np.ndarray,
+        batch_score_2d: np.ndarray,
+        batch_score_priv: np.ndarray,
+        batch_score_support: np.ndarray,
+        batch_score_static: np.ndarray,
+        batch_score_final: np.ndarray,
+        mode: str,
+        target_source: str,
+        band_target: int,
+        band_rows: int,
+        refine_applied: bool,
+        surrogate_df: pd.DataFrame | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        keep_list = [int(idx) for idx in np.asarray(keep_indices, dtype=int).tolist()]
+        if annotate_all:
+            self._annotate_preselect_surrogates(
+                surrogate_records,
+                selected_mask=selected_mask,
+                band_mask=band_mask,
+                batch_id=batch_id,
+                batch_score_1d=batch_score_1d,
+                batch_score_2d=batch_score_2d,
+                batch_score_priv=batch_score_priv,
+                batch_score_support=batch_score_support,
+                batch_score_static=batch_score_static,
+                batch_score_final=batch_score_final,
+                mode=mode,
+                target_source=target_source,
+                band_target=band_target,
+                band_rows=band_rows,
+                refine_applied=refine_applied,
+            )
+            return [valid_records[idx] for idx in keep_list], [surrogate_records[idx] for idx in keep_list]
+
+        kept_valid = [valid_records[idx] for idx in keep_list]
+        if surrogate_df is not None:
+            kept_sur = surrogate_df.iloc[keep_list].to_dict(orient="records")
+        else:
+            kept_sur = [dict(surrogate_records[idx]) for idx in keep_list]
+        if keep_list:
+            self._annotate_preselect_surrogates(
+                kept_sur,
+                selected_mask=np.asarray(selected_mask)[keep_list],
+                band_mask=np.asarray(band_mask)[keep_list],
+                batch_id=np.asarray(batch_id)[keep_list],
+                batch_score_1d=np.asarray(batch_score_1d)[keep_list],
+                batch_score_2d=np.asarray(batch_score_2d)[keep_list],
+                batch_score_priv=np.asarray(batch_score_priv)[keep_list],
+                batch_score_support=np.asarray(batch_score_support)[keep_list],
+                batch_score_static=np.asarray(batch_score_static)[keep_list],
+                batch_score_final=np.asarray(batch_score_final)[keep_list],
+                mode=mode,
+                target_source=target_source,
+                band_target=band_target,
+                band_rows=band_rows,
+                refine_applied=refine_applied,
+            )
+        return kept_valid, kept_sur
+
     def dual_median_filter_baseline(
         self,
         valid_records: list[dict[str, Any]],
         surrogate_records: list[dict[str, Any]],
         target_preselect: int,
         *,
+        candidate_df: pd.DataFrame | None = None,
+        surrogate_df: pd.DataFrame | None = None,
+        annotate_all: bool = True,
         show_progress: bool = False,
         progress_desc: str = "preselect baseline",
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -411,21 +624,27 @@ class PreselectScoringMixin:
             }
             return valid_records.copy(), surrogate_records.copy()
 
-        candidate_df = pd.DataFrame([record["row"] for record in valid_records], columns=self.column_order)
+        candidate_df = self._candidate_frame_from_records(valid_records, candidate_df)
         fidelity_bucket_indices = self._column_bucket_indices_for_df(candidate_df, self.fidelity_bucket_columns)
         pair_codes = self._pair_codes_from_bucket_indices(fidelity_bucket_indices)
 
-        base_score = np.asarray(
-            [float(record.get("s_preselect_band", record.get("s_fid_sur", 0.0))) for record in surrogate_records],
-            dtype=float,
+        base_score = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_band", "s_fid_sur"),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
-        support_tiebreak = np.asarray(
-            [float(record.get("s_preselect_support_tiebreak", 0.0)) for record in surrogate_records],
-            dtype=float,
+        support_tiebreak = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_support_tiebreak",),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
-        privacy_tiebreak = np.asarray(
-            [float(record.get("s_preselect_priv_tiebreak", 0.0)) for record in surrogate_records],
-            dtype=float,
+        privacy_tiebreak = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_priv_tiebreak",),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
 
         fill_report = self._preselect_quota_fill(
@@ -444,24 +663,6 @@ class PreselectScoringMixin:
 
         selected_mask = np.asarray(fill_report["selected_mask"], dtype=bool)
         band_mask = np.ones(total_rows, dtype=bool)
-        self._annotate_preselect_surrogates(
-            surrogate_records,
-            selected_mask=selected_mask,
-            band_mask=band_mask,
-            batch_id=np.asarray(fill_report["batch_id"], dtype=int),
-            batch_score_1d=np.asarray(fill_report["batch_score_1d"], dtype=float),
-            batch_score_2d=np.asarray(fill_report["batch_score_2d"], dtype=float),
-            batch_score_priv=np.asarray(fill_report["batch_score_priv"], dtype=float),
-            batch_score_support=np.asarray(fill_report["batch_score_support"], dtype=float),
-            batch_score_static=np.asarray(fill_report["batch_score_static"], dtype=float),
-            batch_score_final=np.asarray(fill_report["batch_score_final"], dtype=float),
-            mode="three_objective_preselect_v3",
-            target_source="candidate_pool_empirical_scaled",
-            band_target=total_rows,
-            band_rows=total_rows,
-            refine_applied=bool(fill_report["refine_report"].get("applied", False)),
-        )
-
         keep_indices = np.asarray(fill_report["keep_indices"], dtype=int)
         self.last_preselect_report = {
             "mode": "three_objective_preselect_v3",
@@ -476,9 +677,27 @@ class PreselectScoringMixin:
             "refine_applied": bool(fill_report["refine_report"].get("applied", False)),
             "refine_report": fill_report["refine_report"],
         }
-        kept_valid = [valid_records[int(idx)] for idx in keep_indices.tolist()]
-        kept_sur = [surrogate_records[int(idx)] for idx in keep_indices.tolist()]
-        return kept_valid, kept_sur
+        return self._slice_preselect_outputs(
+            valid_records=valid_records,
+            surrogate_records=surrogate_records,
+            keep_indices=keep_indices,
+            annotate_all=annotate_all,
+            selected_mask=selected_mask,
+            band_mask=band_mask,
+            batch_id=np.asarray(fill_report["batch_id"], dtype=int),
+            batch_score_1d=np.asarray(fill_report["batch_score_1d"], dtype=float),
+            batch_score_2d=np.asarray(fill_report["batch_score_2d"], dtype=float),
+            batch_score_priv=np.asarray(fill_report["batch_score_priv"], dtype=float),
+            batch_score_support=np.asarray(fill_report["batch_score_support"], dtype=float),
+            batch_score_static=np.asarray(fill_report["batch_score_static"], dtype=float),
+            batch_score_final=np.asarray(fill_report["batch_score_final"], dtype=float),
+            mode="three_objective_preselect_v3",
+            target_source="candidate_pool_empirical_scaled",
+            band_target=total_rows,
+            band_rows=total_rows,
+            refine_applied=bool(fill_report["refine_report"].get("applied", False)),
+            surrogate_df=surrogate_df,
+        )
 
     def dual_median_filter(
         self,
@@ -487,6 +706,9 @@ class PreselectScoringMixin:
         target_preselect: int,
         *,
         anchor_candidate_ids: np.ndarray | list[int] | None = None,
+        candidate_df: pd.DataFrame | None = None,
+        surrogate_df: pd.DataFrame | None = None,
+        annotate_all: bool = True,
         show_progress: bool = False,
         progress_desc: str = "preselect construction",
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -506,41 +728,41 @@ class PreselectScoringMixin:
             }
             return valid_records.copy(), surrogate_records.copy()
 
-        candidate_df = pd.DataFrame([record["row"] for record in valid_records], columns=self.column_order)
+        candidate_df = self._candidate_frame_from_records(valid_records, candidate_df)
         fidelity_bucket_indices = self._column_bucket_indices_for_df(candidate_df, self.fidelity_bucket_columns)
         pair_codes = self._pair_codes_from_bucket_indices(fidelity_bucket_indices)
 
-        stage_a_base = np.asarray(
-            [
-                float(record.get("s_preselect_band", record.get("s_preselect_fidelity_safe", record.get("s_fid_sur", 0.0))))
-                for record in surrogate_records
-            ],
-            dtype=float,
+        stage_a_base = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_band", "s_preselect_fidelity_safe", "s_fid_sur"),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
-        stage_b_base = np.asarray(
-            [
-                float(
-                    record.get(
-                        "s_preselect_stage_b",
-                        record.get("s_preselect_fidelity_safe", record.get("s_preselect_band", record.get("s_fid_sur", 0.0))),
-                    )
-                )
-                for record in surrogate_records
-            ],
-            dtype=float,
+        stage_b_base = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_stage_b", "s_preselect_fidelity_safe", "s_preselect_band", "s_fid_sur"),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
-        support_tiebreak = np.asarray(
-            [float(record.get("s_preselect_support_tiebreak", 0.0)) for record in surrogate_records],
-            dtype=float,
+        support_tiebreak = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_support_tiebreak",),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
-        privacy_tiebreak = np.asarray(
-            [float(record.get("s_preselect_priv_tiebreak", 0.0)) for record in surrogate_records],
-            dtype=float,
+        privacy_tiebreak = self._surrogate_score_array(
+            surrogate_records,
+            ("s_preselect_priv_tiebreak",),
+            surrogate_df=surrogate_df,
+            total_rows=total_rows,
         )
-        candidate_id_array = np.asarray(
-            [int(record.get("candidate_id", idx)) for idx, record in enumerate(surrogate_records)],
-            dtype=int,
-        )
+        if surrogate_df is not None and "candidate_id" in surrogate_df.columns:
+            candidate_id_array = surrogate_df["candidate_id"].to_numpy(dtype=int, copy=False)
+        else:
+            candidate_id_array = np.asarray(
+                [int(record.get("candidate_id", idx)) for idx, record in enumerate(surrogate_records)],
+                dtype=int,
+            )
         band_scale = 1.40
         band_target = min(total_rows, max(target_preselect, int(np.ceil(float(target_preselect) * band_scale))))
         stage_a_report = self._preselect_quota_fill(
@@ -563,6 +785,9 @@ class PreselectScoringMixin:
                 valid_records=valid_records,
                 surrogate_records=surrogate_records,
                 target_preselect=target_preselect,
+                candidate_df=candidate_df,
+                surrogate_df=surrogate_df,
+                annotate_all=annotate_all,
                 show_progress=show_progress,
                 progress_desc=f"{progress_desc} candidate_empty_band_fallback",
             )
@@ -627,24 +852,6 @@ class PreselectScoringMixin:
                 "jaccard": float(np.count_nonzero(anchor_mask & selected_mask) / max(int(union), 1)),
             }
 
-        self._annotate_preselect_surrogates(
-            surrogate_records,
-            selected_mask=selected_mask,
-            band_mask=band_mask,
-            batch_id=batch_id,
-            batch_score_1d=batch_score_1d,
-            batch_score_2d=batch_score_2d,
-            batch_score_priv=batch_score_priv,
-            batch_score_support=batch_score_support,
-            batch_score_static=batch_score_static,
-            batch_score_final=batch_score_final,
-            mode="two_stage_band_quota_v2",
-            target_source="stage_a_train_clipped_band_then_stage_b_empirical_keep",
-            band_target=band_target,
-            band_rows=int(band_mask.sum()),
-            refine_applied=bool(stage_b_report["refine_report"].get("applied", False)),
-        )
-
         self.last_preselect_report = {
             "mode": "two_stage_band_quota_v2",
             "target_source": "stage_a_train_clipped_band_then_stage_b_empirical_keep",
@@ -699,6 +906,24 @@ class PreselectScoringMixin:
                 ],
             },
         }
-        kept_valid = [valid_records[int(idx)] for idx in keep_indices.tolist()]
-        kept_sur = [surrogate_records[int(idx)] for idx in keep_indices.tolist()]
-        return kept_valid, kept_sur
+        return self._slice_preselect_outputs(
+            valid_records=valid_records,
+            surrogate_records=surrogate_records,
+            keep_indices=keep_indices,
+            annotate_all=annotate_all,
+            selected_mask=selected_mask,
+            band_mask=band_mask,
+            batch_id=batch_id,
+            batch_score_1d=batch_score_1d,
+            batch_score_2d=batch_score_2d,
+            batch_score_priv=batch_score_priv,
+            batch_score_support=batch_score_support,
+            batch_score_static=batch_score_static,
+            batch_score_final=batch_score_final,
+            mode="two_stage_band_quota_v2",
+            target_source="stage_a_train_clipped_band_then_stage_b_empirical_keep",
+            band_target=band_target,
+            band_rows=int(band_mask.sum()),
+            refine_applied=bool(stage_b_report["refine_report"].get("applied", False)),
+            surrogate_df=surrogate_df,
+        )

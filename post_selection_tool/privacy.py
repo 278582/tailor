@@ -124,6 +124,7 @@ class PrivacyMixin:
 
         self.train_matrix = self._encode_df(self.train_df)
         self.holdout_matrix = self._encode_df(self.holdout_df)
+        train_nn_matrix, holdout_nn_matrix = self._privacy_nn_reference_matrices()
 
         if 0 < self.density_reference_size < len(self.train_df):
             rng = np.random.default_rng(self.seed)
@@ -135,8 +136,8 @@ class PrivacyMixin:
         self.density_reference_matrix = self.train_matrix[self.density_reference_indices]
 
         if self.nn_backend == "torch":
-            self.train_tensor = self._to_device_tensor(self.train_matrix)
-            self.holdout_tensor = self._to_device_tensor(self.holdout_matrix)
+            self.train_tensor = self._to_device_tensor(train_nn_matrix)
+            self.holdout_tensor = self._to_device_tensor(holdout_nn_matrix)
             self.density_reference_tensor = self._to_device_tensor(self.density_reference_matrix)
             self.nn_train = None
             self.nn_holdout = None
@@ -146,14 +147,35 @@ class PrivacyMixin:
             self.holdout_tensor = None
             self.density_reference_tensor = None
             self.nn_train = NearestNeighbors(n_neighbors=1, metric="euclidean")
-            self.nn_train.fit(self.train_matrix)
+            self.nn_train.fit(train_nn_matrix)
             self.nn_holdout = NearestNeighbors(n_neighbors=1, metric="euclidean")
-            self.nn_holdout.fit(self.holdout_matrix)
+            self.nn_holdout.fit(holdout_nn_matrix)
             self.nn_density = NearestNeighbors(
                 n_neighbors=min(self.density_k, len(self.density_reference_matrix)),
                 metric="euclidean",
             )
             self.nn_density.fit(self.density_reference_matrix)
+
+    def _privacy_nn_reference_matrices(self) -> tuple[np.ndarray, np.ndarray]:
+        from .census_profile import CENSUS_PRIVACY_NN_CAP, is_census_dataset
+
+        dataset_name = str(self.schema_card.get("dataset", ""))
+        if not is_census_dataset(dataset_name):
+            return self.train_matrix, self.holdout_matrix
+
+        cap = max(int(self.density_reference_size), int(CENSUS_PRIVACY_NN_CAP))
+        rng = np.random.default_rng(int(self.seed) + 17)
+        if cap < len(self.train_matrix):
+            train_idx = np.sort(rng.choice(len(self.train_matrix), size=cap, replace=False))
+            train_nn_matrix = self.train_matrix[train_idx]
+        else:
+            train_nn_matrix = self.train_matrix
+        if cap < len(self.holdout_matrix):
+            hold_idx = np.sort(rng.choice(len(self.holdout_matrix), size=min(cap, len(self.holdout_matrix)), replace=False))
+            holdout_nn_matrix = self.holdout_matrix[hold_idx]
+        else:
+            holdout_nn_matrix = self.holdout_matrix
+        return train_nn_matrix, holdout_nn_matrix
 
     def _fit_density_reference(self) -> None:
         if len(self.density_reference_matrix) <= 1:
@@ -284,10 +306,9 @@ class PrivacyMixin:
         expected_nn = self.train_density_expected_nn[density_buckets]
         gate_strata = self._assign_bins_from_edges(gate_probs, self.train_gate_edges)
         normalized = nn_train / np.clip(expected_nn.astype(float), 1e-12, None)
-        gamma_penalty = self.gamma * np.maximum(0.0, nn_holdout - nn_train)
         v1 = np.log1p(nn_train)
-        v2 = np.maximum(0.0, normalized - gamma_penalty)
-        v3 = np.maximum(0.0, nn_train * (1.0 - gate_probs) - gamma_penalty)
+        v2 = np.maximum(0.0, normalized)
+        v3 = np.maximum(0.0, nn_train * (1.0 - gate_probs))
         selected_values = {"v1": v1, "v2": v2, "v3": v3}.get(self.privacy_version, v2)
         return pd.DataFrame(
             {

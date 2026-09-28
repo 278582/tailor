@@ -34,7 +34,7 @@ class ParetoSelector(
         seed: int,
         source: str = "llm",
         lambda_penalty: float = 1.0,
-        gamma: float = 0.5,
+    gamma: float = 0.0,
         privacy_version: str = "v2",
         density_k: int = 10,
         density_reference_size: int = 5000,

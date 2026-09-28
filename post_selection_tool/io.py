@@ -96,7 +96,8 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def df_to_candidate_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    return [{"candidate_id": int(idx), "row": row.to_dict()} for idx, row in df.reset_index(drop=True).iterrows()]
+    rows = df.reset_index(drop=True).to_dict(orient="records")
+    return [{"candidate_id": int(idx), "row": row} for idx, row in enumerate(rows)]
 
 
 def records_to_df(records: list[dict[str, Any]], column_order: list[str]) -> pd.DataFrame:

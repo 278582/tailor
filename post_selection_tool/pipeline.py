@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .census_profile import should_skip_large_score_dumps
 from .config import CoreSelectionConfig, progress_enabled
 from .context import prepare_context
 from .core_select import build_core_selections
@@ -10,11 +11,14 @@ from .fidelity_ceiling import build_fidelity_ceiling
 from .io import save_csv, save_json, save_jsonl
 from .logging_utils import configure_logging
 from .preselect import build_preselected_valid
+from .scalar_weights import scalar_variant_keep_filename
 from .state import CoreSelectionOutputs, SelectionState
+from .timing import log_pipeline_stages
 from .validation import build_cards_and_validate, initialize_selector_and_pool
 
 
 def save_core_outputs(state: SelectionState, outputs: CoreSelectionOutputs) -> None:
+    config = state.config
     versions_dir = state.paths.versions_dir
     selection_dir = state.paths.selection_dir
     report_dir = state.paths.report_dir
@@ -23,6 +27,8 @@ def save_core_outputs(state: SelectionState, outputs: CoreSelectionOutputs) -> N
     save_csv(versions_dir / "selection_preselected_fidelity_ceiling_keep_k.csv", outputs.fidelity_ceiling_df)
     save_csv(versions_dir / "selection_random_full.csv", outputs.random_full_df)
     save_csv(versions_dir / "selection_scalar.csv", outputs.scalar_df)
+    for variant_name, variant_df in outputs.scalar_variant_dfs.items():
+        save_csv(versions_dir / scalar_variant_keep_filename(variant_name), variant_df)
     save_csv(versions_dir / "selection_pareto.csv", outputs.pareto_df)
     for legacy_filename in (
         "preselected_valid_keep.csv",
@@ -35,11 +41,30 @@ def save_core_outputs(state: SelectionState, outputs: CoreSelectionOutputs) -> N
         if legacy_path.exists():
             legacy_path.unlink()
 
-    save_jsonl(selection_dir / "surrogate_scores.jsonl", state.surrogate_records_all)
-    save_jsonl(selection_dir / "preselected_surrogates.jsonl", state.preselected_surrogates)
+    skip_large_dumps = should_skip_large_score_dumps(config, len(state.surrogate_records_all))
+    if skip_large_dumps:
+        save_json(
+            selection_dir / "large_score_dumps_skipped.json",
+            {
+                "dataset_name": config.dataset_name,
+                "reason": "us_census_data_1990_large_io",
+                "skipped": [
+                    "surrogate_scores.jsonl",
+                    "preselected_surrogates.jsonl",
+                    "utility_static_scores.jsonl",
+                    "utility_proxy_scores.jsonl",
+                ],
+                "pool_rows": int(len(state.surrogate_records_all)),
+                "preselected_rows": int(len(state.preselected_surrogates)),
+                "kept_exact_scores": True,
+            },
+        )
+    else:
+        save_jsonl(selection_dir / "surrogate_scores.jsonl", state.surrogate_records_all)
+        save_jsonl(selection_dir / "preselected_surrogates.jsonl", state.preselected_surrogates)
+        save_jsonl(selection_dir / "utility_static_scores.jsonl", state.utility_proxy_bundle.get("static_scores", []))
+        save_jsonl(selection_dir / "utility_proxy_scores.jsonl", state.utility_proxy_bundle.get("proxy_scores", []))
     save_jsonl(selection_dir / "exact_scores.jsonl", state.global_exact_records)
-    save_jsonl(selection_dir / "utility_static_scores.jsonl", state.utility_proxy_bundle.get("static_scores", []))
-    save_jsonl(selection_dir / "utility_proxy_scores.jsonl", state.utility_proxy_bundle.get("proxy_scores", []))
 
     save_json(selection_dir / "baselines.json", state.global_baselines)
     save_json(selection_dir / "preselect_gate.json", state.preselect_gate)
@@ -52,6 +77,8 @@ def save_core_outputs(state: SelectionState, outputs: CoreSelectionOutputs) -> N
     )
     save_json(selection_dir / "random_full_report.json", outputs.reports.get("random_full", {}))
     save_json(selection_dir / "scalarization_report.json", outputs.reports.get("scalar", {}))
+    if outputs.scalar_variant_dfs:
+        save_json(selection_dir / "scalarization_weight_variants.json", outputs.reports.get("scalar_variants", {}))
     save_json(selection_dir / "pareto_report.json", outputs.reports.get("pareto", {}))
     save_json(report_dir / "timing_report.json", state.timing_report)
     for legacy_filename in (
@@ -95,12 +122,14 @@ def build_core_summary(state: SelectionState, outputs: CoreSelectionOutputs) -> 
         "holdout_rows": int(len(state.holdout_df)),
         "test_rows": int(len(state.test_df)),
         "eval_holdout_policy": {
-            "selection_eval_holdout": "eval_holdout.csv",
+            "selection_eval_holdout": str(getattr(state.dataset_ctx, "holdout_source_path", "")),
+            "eval_train": str(getattr(state.dataset_ctx, "train_source_path", "")),
+            "eval_test": str(getattr(state.dataset_ctx, "test_source_path", "")),
             "holdout_strategy": getattr(state.dataset_ctx, "holdout_strategy", None),
             "post_selection_proxy": True,
             "method_note": (
-                "Selection uses the file-backed eval_holdout split for proxy privacy/utility calibration; "
-                "metric_tool reports final post-selection metrics on eval_test.csv."
+                "Selection reads synthetic/{dataset}/{train,hold,test}.csv directly; "
+                "hold is the privacy proxy split and test is the official DCR/B split."
             ),
         },
         "raw_rows": int(len(state.synthetic_df)),
@@ -115,7 +144,16 @@ def build_core_summary(state: SelectionState, outputs: CoreSelectionOutputs) -> 
         "fidelity_ceiling_rows": int(len(state.fidelity_ceiling_records)),
         "random_full_rows": int(len(outputs.random_full_df)),
         "scalar_rows": int(len(outputs.scalar_df)),
+        "scalar_multi_weight_versions": bool(config.scalar_multi_weight_versions),
+        "scalar_weight_vectors": outputs.reports.get("scalar", {}).get("scalar_weight_vectors", []),
+        "scalar_variant_rows": {
+            name: int(len(frame)) for name, frame in outputs.scalar_variant_dfs.items()
+        },
         "pareto_rows": int(len(outputs.pareto_df)),
+        "census_runtime_profile": getattr(config, "census_runtime_profile", None),
+        "dcr_cap": int(getattr(config, "dcr_cap", 0) or 0),
+        "dcr_repeats": int(getattr(config, "dcr_repeats", 10)),
+        "utility_exact_evaluator": str(getattr(config, "utility_exact_evaluator", "tabdiff_mle")),
         "preselect_status": state.preselect_status,
         "preselect_gate_thresholds": {
             "fidelity_max_drop": float(config.preselect_gate_fidelity_max_drop),
@@ -141,6 +179,10 @@ def build_core_summary(state: SelectionState, outputs: CoreSelectionOutputs) -> 
             "preselected_fidelity_ceiling_keep_k": "versions/selection_preselected_fidelity_ceiling_keep_k.csv",
             "random_full": "versions/selection_random_full.csv",
             "scalar": "versions/selection_scalar.csv",
+            **{
+                f"scalar_{name}": f"versions/{scalar_variant_keep_filename(name)}"
+                for name in outputs.scalar_variant_dfs
+            },
             "pareto": "versions/selection_pareto.csv",
         },
     }
@@ -158,5 +200,6 @@ def run_core_selection(config: CoreSelectionConfig) -> tuple[SelectionState, Cor
     state = compute_global_exact_scores(state)
     state = build_fidelity_ceiling(state)
     outputs = build_core_selections(state)
+    log_pipeline_stages(state.timing_report)
     save_core_outputs(state, outputs)
     return state, outputs

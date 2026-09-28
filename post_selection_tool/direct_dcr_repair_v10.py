@@ -7,6 +7,12 @@ import numpy as np
 import pandas as pd
 import torch
 
+from metric_tool.aligned_dcr import (
+    DEFAULT_DCR_REPEATS,
+    DEFAULT_DCR_SEED,
+    row_signals_from_matrices,
+)
+
 from .direct_dcr_repair_v4 import (
     _build_pairs,
     _candidate_id,
@@ -126,29 +132,43 @@ def _row_dcr_signal_batched_l1(
     device = _resolve_signal_device(str(nn_device))
     query_batch_size = _auto_query_batch_size(pool_matrix.shape[1], int(query_batch_size))
     reference_chunk_size = max(1, int(reference_chunk_size))
-    train_tensor = torch.as_tensor(train_matrix, dtype=torch.float32, device=device)
-    test_tensor = torch.as_tensor(test_matrix, dtype=torch.float32, device=device)
-    dcr_real = _min_l1_distances(
-        query_matrix=pool_matrix,
-        reference_tensor=train_tensor,
-        device=device,
-        query_batch_size=query_batch_size,
-        reference_chunk_size=reference_chunk_size,
-    )
-    dcr_test = _min_l1_distances(
-        query_matrix=pool_matrix,
-        reference_tensor=test_tensor,
-        device=device,
-        query_batch_size=query_batch_size,
-        reference_chunk_size=reference_chunk_size,
+
+    def _min_l1(query_matrix: np.ndarray, reference_matrix: np.ndarray) -> np.ndarray:
+        reference_tensor = torch.as_tensor(
+            np.asarray(reference_matrix, dtype=np.float32),
+            dtype=torch.float32,
+            device=device,
+        )
+        return _min_l1_distances(
+            query_matrix=query_matrix,
+            reference_tensor=reference_tensor,
+            device=device,
+            query_batch_size=query_batch_size,
+            reference_chunk_size=reference_chunk_size,
+        )
+
+    aligned = row_signals_from_matrices(
+        pool_matrix,
+        train_matrix,
+        test_matrix,
+        repeats=int(schema_card.get("dcr_repeats", DEFAULT_DCR_REPEATS)),
+        cap=int(schema_card.get("dcr_cap", 0) or 0),
+        seed=int(schema_card.get("dcr_seed", DEFAULT_DCR_SEED)),
+        min_l1_fn=_min_l1,
     )
     return {
         "features": pool_matrix,
-        "dcr_real": np.asarray(dcr_real, dtype=float),
-        "dcr_test": np.asarray(dcr_test, dtype=float),
-        "is_real_closer": np.asarray(dcr_real < dcr_test, dtype=bool),
-        "margin": np.asarray(dcr_test - dcr_real, dtype=float),
-        "signal_backend": f"torch_{device.type}",
+        "dcr_real": np.asarray(aligned["dcr_real"], dtype=float),
+        "dcr_test": np.asarray(aligned["dcr_test"], dtype=float),
+        "is_real_closer": np.asarray(aligned["is_real_closer"], dtype=bool),
+        "margin": np.asarray(aligned["margin"], dtype=float),
+        "aligned_closer_rate": np.asarray(aligned["aligned_closer_rate"], dtype=float),
+        "dcr_n": int(aligned["dcr_n"]),
+        "dcr_repeats": int(aligned["dcr_repeats"]),
+        "dcr_aligned": True,
+        "dcr_align_mode": str(aligned.get("dcr_align_mode", "paired_nn_coreset")),
+        "dcr_cap": int(aligned.get("dcr_cap", 0) or 0),
+        "signal_backend": f"torch_{device.type}_aligned_l1",
         "signal_query_batch_size": int(query_batch_size),
         "signal_reference_chunk_size": int(reference_chunk_size),
         "signal_feature_count": int(pool_matrix.shape[1]),

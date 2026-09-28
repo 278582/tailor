@@ -748,11 +748,19 @@ def _select_torch_device(selector: "ParetoSelector") -> Any:
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(f"torch_unavailable: {exc}") from exc
 
-    requested = str(getattr(selector, "nn_device", "cpu") or "cpu")
-    if requested.startswith("cuda"):
-        if not torch.cuda.is_available():
-            raise RuntimeError(f"nn_device={requested} requested but torch.cuda.is_available() is False")
-        return torch.device(requested)
+    candidates: list[str] = []
+    for attr in ("nn_device", "eval_device", "nn_device_arg"):
+        value = getattr(selector, attr, None)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text and text not in {"auto", "cpu"}:
+            candidates.append(text)
+    for requested in candidates:
+        if requested.startswith("cuda"):
+            if not torch.cuda.is_available():
+                raise RuntimeError(f"nn_device={requested} requested but torch.cuda.is_available() is False")
+            return torch.device(requested)
     return torch.device("cpu")
 
 

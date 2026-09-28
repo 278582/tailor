@@ -16,9 +16,6 @@ from .theta_pool import build_theta_synthetic_pool_from_manifest
 
 INPUT_FILENAMES = (
     "synthetic_raw.csv",
-    "eval_train.csv",
-    "eval_holdout.csv",
-    "eval_test.csv",
     "selection_context.json",
 )
 
@@ -128,9 +125,6 @@ def prepare_context(config: CoreSelectionConfig) -> SelectionState:
     candidate_source_by_id, theta_s_pool_report = _load_theta_pool_source_metadata(paths.input_dir / "theta_s_pool")
 
     save_shared_csv(paths.input_dir / "synthetic_raw.csv", synthetic_df, shared_input("synthetic_raw.csv"))
-    save_shared_csv(paths.input_dir / "eval_train.csv", train_df, shared_input("eval_train.csv"))
-    save_shared_csv(paths.input_dir / "eval_holdout.csv", holdout_df, shared_input("eval_holdout.csv"))
-    save_shared_csv(paths.input_dir / "eval_test.csv", test_df, shared_input("eval_test.csv"))
     save_shared_json(paths.input_dir / "selection_context.json", dataset_ctx.to_manifest(), shared_input("selection_context.json"))
 
     return SelectionState(

@@ -9,6 +9,8 @@ from typing import Any, Iterable
 
 
 THETA_FIELDS = ("col_1ds", "col_2ds", "col_ps", "col_u")
+BUDGET_THETA_SOURCES = tuple(f"budget_{budget:03d}" for budget in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100))
+BUDGET_SOURCE_PATTERN = re.compile(r"^budget_(\d{3})$")
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,24 @@ def mark_report_default_fidelity_columns(
     return updated_report
 
 
+def _theta_record_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    strategy = payload.get("best_strategy")
+    if isinstance(strategy, dict) and isinstance(strategy.get("theta"), dict):
+        return strategy
+    return payload
+
+
+def parse_budget_theta_source(theta_source: str | None) -> int | None:
+    match = BUDGET_SOURCE_PATTERN.fullmatch(str(theta_source or "").strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def budget_snapshot_path(mcts_dir: Path, budget: int) -> Path:
+    return Path(mcts_dir) / "budget_snapshots" / f"budget_{int(budget):03d}.json"
+
+
 def _finite_float(value: Any) -> float | None:
     try:
         number = float(value)
@@ -232,7 +252,7 @@ def resolve_theta_synthetic_pool(guidance: ThetaGuidance | None) -> tuple[Path |
 
 def load_theta_json(path: Path, *, source_kind: str = "path") -> ThetaGuidance:
     path = Path(path)
-    payload = _load_json(path)
+    payload = _theta_record_payload(_load_json(path))
     reward, reward_key = _reward_from_payload(payload)
     rollout_dir = _path_from_record(payload.get("rollout_dir"))
     if rollout_dir is None and path.name == "theta.json" and path.parent.parent.name == "rollouts":
@@ -297,6 +317,29 @@ def load_final_theta(mcts_dir: Path) -> ThetaGuidance:
     return ThetaGuidance(
         theta=guidance.theta,
         source_kind=guidance.source_kind,
+        source_path=guidance.source_path,
+        mcts_dir=mcts_dir,
+        theta_id=guidance.theta_id,
+        reward=guidance.reward,
+        reward_key=guidance.reward_key,
+        node_id=guidance.node_id,
+        s_id=guidance.s_id,
+        rollout_dir=guidance.rollout_dir,
+        synthetic_csv=guidance.synthetic_csv,
+        synthetic_pool_manifest=guidance.synthetic_pool_manifest,
+    )
+
+
+def load_budget_snapshot_theta(mcts_dir: Path, budget: int) -> ThetaGuidance:
+    mcts_dir = Path(mcts_dir)
+    path = budget_snapshot_path(mcts_dir, budget)
+    if not path.exists():
+        raise FileNotFoundError(f"Cannot find budget snapshot: {path}")
+    source_kind = f"budget_{int(budget):03d}"
+    guidance = load_theta_json(path, source_kind=source_kind)
+    return ThetaGuidance(
+        theta=guidance.theta,
+        source_kind=source_kind,
         source_path=guidance.source_path,
         mcts_dir=mcts_dir,
         theta_id=guidance.theta_id,
@@ -529,6 +572,9 @@ def resolve_theta_guidance(
     )
     if theta_source == "final":
         return load_final_theta(mcts_dir)
+    budget = parse_budget_theta_source(theta_source)
+    if budget is not None:
+        return load_budget_snapshot_theta(mcts_dir, budget)
     if theta_source == "best-rollout":
         return load_best_rollout_theta(mcts_dir)
     if theta_source == "auto":

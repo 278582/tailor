@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pandas as pd
 
 from .direct_dcr_repair_v19 import apply_direct_dcr_repair_v19
+from .logging_utils import get_logger
+from .timing import record_pipeline_stage
 
 
 def dcr_signal_schema_card(config: Any, selector: Any) -> dict[str, Any]:
@@ -13,6 +16,10 @@ def dcr_signal_schema_card(config: Any, selector: Any) -> dict[str, Any]:
     theta_all_columns = bool(getattr(config, "theta_col_ps_all_columns", False))
     full_reference_requested = bool(getattr(config, "dcr_signal_full_reference", False))
     dcr_schema_card["theta_guidance_enabled"] = theta_enabled
+    dcr_schema_card["dcr_repeats"] = int(getattr(config, "dcr_repeats", 10))
+    dcr_schema_card["dcr_cap"] = int(getattr(config, "dcr_cap", 0) or 0)
+    dcr_schema_card["dcr_seed"] = int(getattr(config, "dcr_seed", getattr(config, "seed", 20260420)))
+    dcr_schema_card["dcr_align_mode"] = "paired_nn_coreset" if int(dcr_schema_card["dcr_cap"]) <= 0 else "independent_thinning"
     if full_reference_requested:
         dcr_schema_card["dcr_signal_column_source"] = "full_reference_override"
         return dcr_schema_card
@@ -43,6 +50,7 @@ def apply_pareto_post_selection_repairs(
 
     config = state.config
     selector = state.selector
+    started = time.perf_counter()
     direct_dcr_v19_report: dict[str, Any] = {
         "enabled": bool(getattr(config, "direct_dcr_repair_v19_enabled", False)),
         "version": "direct_dcr_repair_v19",
@@ -81,6 +89,20 @@ def apply_pareto_post_selection_repairs(
             target_mismatch_penalty=config.direct_dcr_repair_v19_target_mismatch_penalty,
             generic_remove_budget=config.direct_dcr_repair_v19_generic_remove_budget,
         )
+    elapsed = float(time.perf_counter() - started)
+    record_pipeline_stage(
+        state.timing_report,
+        "dcr_repair",
+        elapsed,
+        dcr_repair_enabled=bool(direct_dcr_v19_report.get("enabled", False)),
+        dcr_repair_applied=bool(direct_dcr_v19_report.get("applied", False)),
+        dcr_repair_internal_elapsed_seconds=direct_dcr_v19_report.get("elapsed_seconds"),
+    )
+    get_logger().info(
+        "[pipeline_stages] dcr_repair done applied=%s elapsed=%.2fs",
+        bool(direct_dcr_v19_report.get("applied", False)),
+        elapsed,
+    )
     return (
         pareto_df,
         pareto_records,

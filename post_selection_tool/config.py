@@ -29,9 +29,10 @@ class CoreSelectionConfig:
     scalar_fidelity_weight: float = 0.5
     scalar_privacy_weight: float = 0.3
     scalar_utility_weight: float = 0.2
+    scalar_multi_weight_versions: bool = False
 
     lambda_penalty: float = 1.0
-    gamma: float = 0.5
+    gamma: float = 0.0
     privacy_version: str = "v2"
     nn_device: str = "auto"
     nn_query_batch_size: int = 2048
@@ -78,6 +79,13 @@ class CoreSelectionConfig:
     direct_dcr_repair_v19_signal_query_batch_size: int = 0
     direct_dcr_repair_v19_signal_reference_chunk_size: int = 65536
     dcr_signal_full_reference: bool = False
+    dcr_repeats: int = 10
+    dcr_cap: int = 0
+    dcr_seed: int = 20260420
+    utility_exact_evaluator: str = "tabdiff_mle"
+    utility_exact_torch_epochs: int = 6
+    utility_exact_torch_batch_size: int = 2048
+    utility_exact_torch_importance_sample_size: int = 2000
     direct_dcr_repair_v19_report_id_limit: int = 64
     direct_dcr_repair_v19_target_bins: int = 12
     direct_dcr_repair_v19_quality_weight: float = 0.20
@@ -117,6 +125,7 @@ class CoreSelectionConfig:
     log_file: Path | None = None
     disable_progress: bool = False
     save_validation_records: bool = True
+    census_runtime_profile: dict[str, Any] | None = None
 
 
 def progress_enabled(config: CoreSelectionConfig) -> bool:

@@ -7,7 +7,9 @@ from .io import records_to_df
 from .logging_utils import get_logger
 from .pareto_repair import apply_pareto_post_selection_repairs
 from .reward_candidate_v2 import refine_selection_for_reward_v2
+from .scalar_weights import ScalarWeightVector, resolve_scalar_weight_vectors
 from .state import CoreSelectionOutputs, SelectionState
+from .timing import nsga_selection_path, record_pipeline_stage
 
 
 def _log(message: str) -> None:
@@ -115,9 +117,15 @@ def _apply_post_dcr_signal_override(
 
     margins = [float(value) for value in signal["margin"]]
     real_flags = [bool(value) for value in signal["is_real_closer"]]
-    for proxy_record, margin, is_real_closer in zip(proxy_records, margins, real_flags):
-        proxy_record["holdout_gap"] = float(margin)
+    closer_rates = signal.get("aligned_closer_rate")
+    if closer_rates is None:
+        closer_rates = [1.0 if flag else 0.0 for flag in real_flags]
+    else:
+        closer_rates = [float(value) for value in closer_rates]
+    for proxy_record, margin, is_real_closer, closer_rate in zip(proxy_records, margins, real_flags, closer_rates):
+        proxy_record["holdout_gap"] = float(closer_rate) - 0.5
         proxy_record["direct_dcr_real_closer"] = bool(is_real_closer)
+        proxy_record["aligned_closer_rate"] = float(closer_rate)
 
     selected_flags = real_flags[: max(0, min(int(selected_rows), len(real_flags)))]
     selected_dcr = float(sum(1 for flag in selected_flags if flag) / len(selected_flags)) if selected_flags else 0.5
@@ -194,6 +202,30 @@ def _post_dcr_reward_refine_inputs(
     }
 
 
+def _select_scalar_keep(
+    state: SelectionState,
+    vector: ScalarWeightVector,
+) -> tuple[Any, list[dict[str, Any]], dict[str, Any]]:
+    selector = state.selector
+    if selector is None:
+        raise RuntimeError("selector is required before scalar selection")
+    df, records, report = selector.select_keep_scalarization(
+        preselected_records=state.preselected_valid,
+        exact_records=state.global_exact_records,
+        keep_k=state.effective_keep_k,
+        fidelity_1d_weight=vector.fidelity_1d,
+        fidelity_2d_weight=vector.fidelity_2d,
+        privacy_weight=vector.privacy,
+        utility_weight=vector.utility,
+        mode="matched",
+        floor_reference=state.floor_reference,
+    )
+    return df, records, {
+        **report,
+        **vector.to_report(),
+    }
+
+
 def build_core_selections(state: SelectionState) -> CoreSelectionOutputs:
     if state.selector is None:
         raise RuntimeError("selector is required before build_core_selections")
@@ -216,22 +248,41 @@ def build_core_selections(state: SelectionState) -> CoreSelectionOutputs:
     _log(f"random_full done rows={len(random_full_df)} elapsed={time.perf_counter() - t0:.2f}s")
 
     t0 = time.perf_counter()
-    _log(f"scalar start rows={len(state.preselected_valid)} keep_k={state.effective_keep_k}")
-    scalar_df, scalar_records, scalar_report = selector.select_keep_scalarization(
-        preselected_records=state.preselected_valid,
-        exact_records=state.global_exact_records,
-        keep_k=state.effective_keep_k,
-        fidelity_1d_weight=0.5 * config.scalar_fidelity_weight,
-        fidelity_2d_weight=0.5 * config.scalar_fidelity_weight,
+    scalar_vectors = resolve_scalar_weight_vectors(
+        enabled=bool(config.scalar_multi_weight_versions),
+        fidelity_weight=config.scalar_fidelity_weight,
         privacy_weight=config.scalar_privacy_weight,
         utility_weight=config.scalar_utility_weight,
-        mode="matched",
-        floor_reference=state.floor_reference,
     )
-    _log(f"scalar done rows={len(scalar_df)} elapsed={time.perf_counter() - t0:.2f}s")
+    _log(
+        "scalar start rows="
+        f"{len(state.preselected_valid)} keep_k={state.effective_keep_k} "
+        f"versions={len(scalar_vectors)} multi={bool(config.scalar_multi_weight_versions)}"
+    )
+    scalar_df, scalar_records, scalar_report = _select_scalar_keep(state, scalar_vectors[0])
+    scalar_variant_dfs: dict[str, Any] = {}
+    scalar_variant_records: dict[str, list[dict[str, Any]]] = {}
+    scalar_variant_reports: dict[str, Any] = {scalar_vectors[0].name: scalar_report}
+    for vector in scalar_vectors[1:]:
+        variant_df, variant_records, variant_report = _select_scalar_keep(state, vector)
+        scalar_variant_dfs[vector.name] = variant_df
+        scalar_variant_records[vector.name] = variant_records
+        scalar_variant_reports[vector.name] = variant_report
+    scalar_report = {
+        **scalar_report,
+        "scalar_multi_weight_versions": bool(config.scalar_multi_weight_versions),
+        "scalar_weight_vectors": [vector.to_report() for vector in scalar_vectors],
+        "variants": scalar_variant_reports,
+    }
+    _log(
+        "scalar done rows="
+        f"{len(scalar_df)} variants={list(scalar_variant_dfs)} "
+        f"elapsed={time.perf_counter() - t0:.2f}s"
+    )
 
     t0 = time.perf_counter()
     _log(f"pareto start rows={len(state.preselected_valid)} keep_k={state.effective_keep_k}")
+    t_nsga = time.perf_counter()
     pareto_df, pareto_records, pareto_report = selector.select_keep(
         preselected_records=state.preselected_valid,
         surrogate_records=[],
@@ -247,6 +298,20 @@ def build_core_selections(state: SelectionState) -> CoreSelectionOutputs:
         soft_min_score_delta=config.pareto_soft_min_score_delta,
         allow_reference_anchor=True,
     )
+    nsga_elapsed = float(time.perf_counter() - t_nsga)
+    record_pipeline_stage(
+        state.timing_report,
+        "nsga_ii",
+        nsga_elapsed,
+        nsga_ii_selection_path=nsga_selection_path(
+            pareto_report,
+            has_floor_reference=bool(state.floor_reference),
+        ),
+        nsga_ii_front_component_mode=pareto_report.get("front_component_mode"),
+        nsga_ii_rows=int(len(state.preselected_valid)),
+        nsga_ii_keep_k=int(state.effective_keep_k),
+    )
+    _log(f"nsga_ii done rows={len(pareto_df)} elapsed={nsga_elapsed:.2f}s")
     if config.reward_candidate_v2_enabled and config.reward_candidate_v2_pre_repair_enabled:
         pareto_df, pareto_records, reward_v2_pre_report = refine_selection_for_reward_v2(
             preselected_records=state.preselected_valid,
@@ -331,10 +396,13 @@ def build_core_selections(state: SelectionState) -> CoreSelectionOutputs:
         fidelity_ceiling_records=state.fidelity_ceiling_records,
         random_full_records=random_full_records,
         scalar_records=scalar_records,
+        scalar_variant_dfs=scalar_variant_dfs,
+        scalar_variant_records=scalar_variant_records,
         pareto_records=pareto_records,
         reports={
             "random_full": random_full_report,
             "scalar": scalar_report,
+            "scalar_variants": scalar_variant_reports,
             "pareto": pareto_report,
         },
     )

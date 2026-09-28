@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .census_profile import apply_census_runtime_profile
 from .config import CoreSelectionConfig
 from .logging_utils import get_logger
 from .pipeline import run_core_selection
-from .theta_guidance import resolve_theta_guidance, resolve_theta_synthetic_pool
+from .theta_guidance import BUDGET_THETA_SOURCES, resolve_theta_guidance, resolve_theta_synthetic_pool
 
 
 def _parse_column_list(value: str | None) -> list[str] | None:
@@ -32,6 +33,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scalar-fidelity-weight", type=float, default=CoreSelectionConfig.scalar_fidelity_weight)
     parser.add_argument("--scalar-privacy-weight", type=float, default=CoreSelectionConfig.scalar_privacy_weight)
     parser.add_argument("--scalar-utility-weight", type=float, default=CoreSelectionConfig.scalar_utility_weight)
+    parser.add_argument(
+        "--enable-scalar-multi-weight-versions",
+        action="store_true",
+        help="If set, write four scalar keep tables with recommended fidelity/privacy/utility weights.",
+    )
     parser.add_argument("--lambda-penalty", type=float, default=CoreSelectionConfig.lambda_penalty)
     parser.add_argument("--gamma", type=float, default=CoreSelectionConfig.gamma)
     parser.add_argument("--privacy-version", choices=["v1", "v2", "v3"], default=CoreSelectionConfig.privacy_version)
@@ -39,6 +45,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nn-query-batch-size", type=int, default=CoreSelectionConfig.nn_query_batch_size)
     parser.add_argument("--nn-reference-chunk-size", type=int, default=CoreSelectionConfig.nn_reference_chunk_size)
     parser.add_argument("--density-reference-size", type=int, default=CoreSelectionConfig.density_reference_size)
+    parser.add_argument("--dcr-repeats", type=int, default=CoreSelectionConfig.dcr_repeats)
+    parser.add_argument("--dcr-cap", type=int, default=CoreSelectionConfig.dcr_cap)
+    parser.add_argument("--dcr-seed", type=int, default=CoreSelectionConfig.dcr_seed)
+    parser.add_argument(
+        "--utility-exact-evaluator",
+        choices=["tabdiff_mle", "torch_lightweight_mlp"],
+        default=CoreSelectionConfig.utility_exact_evaluator,
+        help="Exact utility evaluator for search-time scoring. census defaults to torch_lightweight_mlp.",
+    )
     parser.add_argument("--final-fidelity-floor-eps", type=float, default=CoreSelectionConfig.final_fidelity_floor_eps)
     parser.add_argument("--final-trend-floor-eps", type=float, default=CoreSelectionConfig.final_trend_floor_eps)
     parser.add_argument("--fidelity-ceiling-utility-weight", type=float, default=CoreSelectionConfig.fidelity_ceiling_utility_weight)
@@ -243,9 +258,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--theta-source",
-        choices=["none", "final", "best-rollout", "best-artifact", "auto"],
+        choices=["none", "final", "best-rollout", "best-artifact", "auto", *BUDGET_THETA_SOURCES],
         default="none",
-        help="Theta source under --theta-mcts-dir, or under --theta-artifact-root/--dataset-name/--theta-run-name/mcts_v2 or mcts.",
+        help=(
+            "Theta source under --theta-mcts-dir, or under --theta-artifact-root/--dataset-name/"
+            "--theta-run-name/mcts_v2 or mcts. budget_010 reads budget_snapshots/budget_010.json."
+        ),
     )
     parser.add_argument("--theta-mcts-dir", type=Path, default=None)
     parser.add_argument("--theta-artifact-root", type=Path, default=Path("artifacts/llm_mcts_llm"))
@@ -298,6 +316,16 @@ def parse_args() -> argparse.Namespace:
         "--theta-default-utility-balance",
         action="store_true",
         help="Keep theta guidance but use the selector default utility balance instead of theta col_u.",
+    )
+    parser.add_argument(
+        "--allow-target-in-fidelity-columns",
+        action="store_true",
+        help="Keep the target column in theta col_1ds/col_2ds. Required to apply a search theta that includes the target.",
+    )
+    parser.add_argument(
+        "--allow-target-in-privacy-columns",
+        action="store_true",
+        help="Keep the target column in theta col_ps if the frozen search theta included it.",
     )
     parser.add_argument("--disable-high-cardinality-compression", action="store_true")
     parser.add_argument("--high-cardinality-threshold", type=int, default=CoreSelectionConfig.high_cardinality_threshold)
@@ -382,7 +410,7 @@ def config_from_args(args: argparse.Namespace) -> CoreSelectionConfig:
     if theta_guidance is not None:
         theta_guidance_report["reward_candidate_v2_enabled"] = bool(reward_candidate_v2_enabled)
 
-    return CoreSelectionConfig(
+    config = CoreSelectionConfig(
         synthetic_csv=synthetic_csv,
         theta_s_pool_manifest=theta_s_pool_manifest,
         theta_s_pool_sample_root=args.theta_s_pool_sample_root,
@@ -400,6 +428,7 @@ def config_from_args(args: argparse.Namespace) -> CoreSelectionConfig:
         scalar_fidelity_weight=args.scalar_fidelity_weight,
         scalar_privacy_weight=args.scalar_privacy_weight,
         scalar_utility_weight=args.scalar_utility_weight,
+        scalar_multi_weight_versions=bool(args.enable_scalar_multi_weight_versions),
         lambda_penalty=args.lambda_penalty,
         gamma=args.gamma,
         privacy_version=args.privacy_version,
@@ -407,6 +436,10 @@ def config_from_args(args: argparse.Namespace) -> CoreSelectionConfig:
         nn_query_batch_size=args.nn_query_batch_size,
         nn_reference_chunk_size=args.nn_reference_chunk_size,
         density_reference_size=args.density_reference_size,
+        dcr_repeats=args.dcr_repeats,
+        dcr_cap=args.dcr_cap,
+        dcr_seed=args.dcr_seed,
+        utility_exact_evaluator=args.utility_exact_evaluator,
         final_fidelity_floor_eps=args.final_fidelity_floor_eps,
         final_trend_floor_eps=args.final_trend_floor_eps,
         fidelity_ceiling_utility_weight=args.fidelity_ceiling_utility_weight,
@@ -472,8 +505,8 @@ def config_from_args(args: argparse.Namespace) -> CoreSelectionConfig:
         theta_default_fidelity_columns=bool(args.theta_default_fidelity_columns),
         theta_default_utility_balance=bool(args.theta_default_utility_balance),
         theta_guidance_report=theta_guidance_report,
-        allow_target_in_fidelity_columns=CoreSelectionConfig.allow_target_in_fidelity_columns,
-        allow_target_in_privacy_columns=CoreSelectionConfig.allow_target_in_privacy_columns,
+        allow_target_in_fidelity_columns=bool(args.allow_target_in_fidelity_columns),
+        allow_target_in_privacy_columns=bool(args.allow_target_in_privacy_columns),
         high_cardinality_enabled=False if args.disable_high_cardinality_compression else None,
         high_cardinality_threshold=args.high_cardinality_threshold,
         high_cardinality_top_k=args.high_cardinality_top_k,
@@ -484,6 +517,7 @@ def config_from_args(args: argparse.Namespace) -> CoreSelectionConfig:
         disable_progress=args.disable_progress,
         save_validation_records=not bool(args.skip_validation_records),
     )
+    return apply_census_runtime_profile(config)
 
 
 def main() -> None:

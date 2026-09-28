@@ -31,6 +31,8 @@ class CoreSelectionOutputs:
     fidelity_ceiling_records: list[dict[str, Any]] = field(default_factory=list)
     random_full_records: list[dict[str, Any]] = field(default_factory=list)
     scalar_records: list[dict[str, Any]] = field(default_factory=list)
+    scalar_variant_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
+    scalar_variant_records: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     pareto_records: list[dict[str, Any]] = field(default_factory=list)
     reports: dict[str, Any] = field(default_factory=dict)
 

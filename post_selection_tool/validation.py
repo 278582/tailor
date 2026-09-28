@@ -9,6 +9,7 @@ from postprocess.cards import build_and_save_cards
 from postprocess.types import CardsBundle
 from postprocess.validator import TabularValidator
 
+from .census_profile import bind_selector_utility_runtime, is_census_dataset
 from .config import progress_enabled
 from .context import resolve_eval_device, resolve_nn_device
 from .io import (
@@ -124,29 +125,56 @@ def _filter_target_column_list(
     }
 
 
+def _skipped_target_filter_report(field_name: str, reason: str) -> dict[str, Any]:
+    return {
+        "field": field_name,
+        "active": False,
+        "removed_target_columns": [],
+        "before_count": None,
+        "after_count": None,
+        "fallback_applied": False,
+        "skipped": reason,
+    }
+
+
 def _remove_target_from_guided_columns(config: Any, schema_card: dict[str, Any]) -> None:
     report = dict(config.theta_guidance_report or {"enabled": False})
     if not bool(report.get("enabled", False)):
         return
+    allow_target_in_fidelity = bool(getattr(config, "allow_target_in_fidelity_columns", False))
+    allow_target_in_privacy = bool(getattr(config, "allow_target_in_privacy_columns", False))
     field_reports: dict[str, Any] = {}
-    config.fidelity_1d_columns, field_reports["col_1ds"] = _filter_target_column_list(
-        config.fidelity_1d_columns,
-        field_name="col_1ds",
-        schema_card=schema_card,
-        fallback_when_empty=True,
-    )
-    config.fidelity_2d_anchor_columns, field_reports["col_2ds"] = _filter_target_column_list(
-        config.fidelity_2d_anchor_columns,
-        field_name="col_2ds",
-        schema_card=schema_card,
-        fallback_when_empty=False,
-    )
-    config.privacy_columns, field_reports["col_ps"] = _filter_target_column_list(
-        config.privacy_columns,
-        field_name="col_ps",
-        schema_card=schema_card,
-        fallback_when_empty=True,
-    )
+    if allow_target_in_fidelity:
+        field_reports["col_1ds"] = _skipped_target_filter_report(
+            "col_1ds", "allow_target_in_fidelity_columns"
+        )
+        field_reports["col_2ds"] = _skipped_target_filter_report(
+            "col_2ds", "allow_target_in_fidelity_columns"
+        )
+    else:
+        config.fidelity_1d_columns, field_reports["col_1ds"] = _filter_target_column_list(
+            config.fidelity_1d_columns,
+            field_name="col_1ds",
+            schema_card=schema_card,
+            fallback_when_empty=True,
+        )
+        config.fidelity_2d_anchor_columns, field_reports["col_2ds"] = _filter_target_column_list(
+            config.fidelity_2d_anchor_columns,
+            field_name="col_2ds",
+            schema_card=schema_card,
+            fallback_when_empty=False,
+        )
+    if allow_target_in_privacy:
+        field_reports["col_ps"] = _skipped_target_filter_report(
+            "col_ps", "allow_target_in_privacy_columns"
+        )
+    else:
+        config.privacy_columns, field_reports["col_ps"] = _filter_target_column_list(
+            config.privacy_columns,
+            field_name="col_ps",
+            schema_card=schema_card,
+            fallback_when_empty=True,
+        )
     target_column = str(schema_card.get("target_column", ""))
     utility_removed = config.utility_balance_column == target_column
     if utility_removed:
@@ -290,11 +318,19 @@ def build_cards_and_validate(state: SelectionState, *, show_progress: bool = Fal
     config = state.config
     cards = _build_or_share_cards(state)
     validator = TabularValidator(cards.schema_card, cards.stats_card)
-    validation_bundle = validator.validate(
-        df_to_candidate_records(state.synthetic_df),
-        show_progress=show_progress,
-        progress_desc="validate candidates",
-    )
+    if is_census_dataset(config.dataset_name):
+        validation_bundle = validator.validate_dataframe(
+            state.synthetic_df,
+            show_progress=show_progress,
+            progress_desc="validate candidates",
+            materialize_rejected=bool(config.save_validation_records),
+        )
+    else:
+        validation_bundle = validator.validate(
+            df_to_candidate_records(state.synthetic_df),
+            show_progress=show_progress,
+            progress_desc="validate candidates",
+        )
     valid_df, valid_records, rejected_records, required_missing_report = _reject_required_missing_rows(
         valid_df=validation_bundle.valid_df.reset_index(drop=True),
         valid_records=validation_bundle.valid_records,
@@ -402,6 +438,7 @@ def initialize_selector_and_pool(state: SelectionState) -> SelectionState:
         high_cardinality_tail_clusters=config.high_cardinality_tail_clusters,
     )
     selector.progress_enabled = progress_enabled(config)
+    bind_selector_utility_runtime(selector, config)
 
     pool_df = state.valid_df.copy()
     pool_records = state.valid_records.copy()

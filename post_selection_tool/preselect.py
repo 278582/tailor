@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -8,11 +9,14 @@ import pandas as pd
 
 from postprocess.tabdiff_eval import TabDiffSelectionEvaluator
 
+from .census_profile import is_census_dataset
 from .config import progress_enabled
 from .context import resolve_eval_device
 from .io import ensure_dir, records_to_df, save_csv
+from .logging_utils import get_logger
 from .preselect_dcr_balance import rebalance_preselected_for_dcr_surrogate
 from .state import SelectionState
+from .timing import record_pipeline_stage
 
 
 def selection_delta(base_metrics: dict[str, Any], target_metrics: dict[str, Any]) -> dict[str, Any]:
@@ -61,9 +65,12 @@ def _build_gate_evaluator(
             dataset_name=state.config.dataset_name,
             device=eval_device,
             metric_list=["density", "dcr"],
-            real_data_path=state.paths.input_dir / "eval_train.csv",
-            test_data_path=state.paths.input_dir / "eval_test.csv",
-            val_data_path=state.paths.input_dir / "eval_holdout.csv",
+            real_data_path=state.dataset_ctx.train_source_path,
+            test_data_path=state.dataset_ctx.test_source_path,
+            val_data_path=state.dataset_ctx.holdout_source_path,
+            dcr_repeats=int(getattr(state.config, "dcr_repeats", 10)),
+            dcr_cap=int(getattr(state.config, "dcr_cap", 0) or 0),
+            dcr_seed=int(getattr(state.config, "dcr_seed", state.config.seed)),
         ), False
 
     shared_root = getattr(state.config, "shared_artifact_dir", None)
@@ -72,9 +79,9 @@ def _build_gate_evaluator(
         if shared_root is not None
         else state.paths.selection_dir / "preselect_gate_compressed"
     )
-    real_df = compressor.transform_df(pd.read_csv(state.paths.input_dir / "eval_train.csv"))
-    test_df = compressor.transform_df(pd.read_csv(state.paths.input_dir / "eval_test.csv"))
-    holdout_df = compressor.transform_df(pd.read_csv(state.paths.input_dir / "eval_holdout.csv"))
+    real_df = compressor.transform_df(state.train_df)
+    test_df = compressor.transform_df(state.test_df)
+    holdout_df = compressor.transform_df(state.holdout_df)
     real_path = compressed_dir / "eval_train.csv"
     test_path = compressed_dir / "eval_test.csv"
     holdout_path = compressed_dir / "eval_holdout.csv"
@@ -88,6 +95,9 @@ def _build_gate_evaluator(
         real_data_path=real_path,
         test_data_path=test_path,
         val_data_path=holdout_path,
+        dcr_repeats=int(getattr(state.config, "dcr_repeats", 10)),
+        dcr_cap=int(getattr(state.config, "dcr_cap", 0) or 0),
+        dcr_seed=int(getattr(state.config, "dcr_seed", state.config.seed)),
     ), True
 
 
@@ -198,33 +208,60 @@ def build_preselected_valid(state: SelectionState) -> SelectionState:
     if state.selector is None or state.pool_df is None:
         raise RuntimeError("initialize_selector_and_pool must run before build_preselected_valid")
 
+    started = time.perf_counter()
     config = state.config
     selector = state.selector
     progress = progress_enabled(config)
     state.desired_keep_k = min(config.keep_k, len(state.pool_records))
     state.requested_preselect_target = min(len(state.pool_records), max(config.preselect_target, state.desired_keep_k))
-    state.surrogate_records_all = selector.compute_surrogates(
-        state.pool_df,
-        show_progress=progress,
-        progress_desc="surrogate scoring",
-        candidate_ids=np.fromiter(
-            (int(record.get("candidate_id", idx)) for idx, record in enumerate(state.pool_records)),
-            dtype=int,
-            count=len(state.pool_records),
-        ),
+    census_preselect = is_census_dataset(config.dataset_name)
+    candidate_ids = np.fromiter(
+        (int(record.get("candidate_id", idx)) for idx, record in enumerate(state.pool_records)),
+        dtype=int,
+        count=len(state.pool_records),
     )
+    if census_preselect:
+        surrogate_df = selector.compute_surrogates(
+            state.pool_df,
+            show_progress=progress,
+            progress_desc="surrogate scoring",
+            candidate_ids=candidate_ids,
+            return_frame=True,
+        )
+        if not isinstance(surrogate_df, pd.DataFrame):
+            raise RuntimeError("census surrogate scoring must return a DataFrame")
+        state.surrogate_records_all = []
+    else:
+        surrogate_df = None
+        state.surrogate_records_all = selector.compute_surrogates(
+            state.pool_df,
+            show_progress=progress,
+            progress_desc="surrogate scoring",
+            candidate_ids=candidate_ids,
+        )
 
     preselect_should_run = (
         state.requested_preselect_target < len(state.pool_records)
         and len(state.pool_records) > state.desired_keep_k
     )
     if preselect_should_run:
-        baseline_surrogates = [dict(record) for record in state.surrogate_records_all]
-        candidate_surrogates = [dict(record) for record in state.surrogate_records_all]
+        baseline_surrogates = (
+            []
+            if census_preselect
+            else [dict(record) for record in state.surrogate_records_all]
+        )
+        candidate_surrogates = (
+            []
+            if census_preselect
+            else [dict(record) for record in state.surrogate_records_all]
+        )
         baseline_valid, baseline_sur = selector.dual_median_filter_baseline(
             valid_records=state.pool_records,
             surrogate_records=baseline_surrogates,
             target_preselect=state.requested_preselect_target,
+            candidate_df=state.pool_df,
+            surrogate_df=surrogate_df,
+            annotate_all=not census_preselect,
             show_progress=progress,
             progress_desc="preselect baseline",
         )
@@ -238,6 +275,9 @@ def build_preselected_valid(state: SelectionState) -> SelectionState:
             surrogate_records=candidate_surrogates,
             target_preselect=state.requested_preselect_target,
             anchor_candidate_ids=baseline_candidate_ids,
+            candidate_df=state.pool_df,
+            surrogate_df=surrogate_df,
+            annotate_all=not census_preselect,
             show_progress=progress,
             progress_desc="preselect candidate",
         )
@@ -303,7 +343,11 @@ def build_preselected_valid(state: SelectionState) -> SelectionState:
         }
     else:
         state.preselected_valid = state.pool_records.copy()
-        state.preselected_surrogates = state.surrogate_records_all.copy()
+        state.preselected_surrogates = (
+            surrogate_df.to_dict(orient="records")
+            if census_preselect and isinstance(surrogate_df, pd.DataFrame)
+            else state.surrogate_records_all.copy()
+        )
         state.preselect_gate = {
             "skipped": True,
             "reason": (
@@ -326,7 +370,11 @@ def build_preselected_valid(state: SelectionState) -> SelectionState:
 
     if len(state.preselected_valid) < state.desired_keep_k:
         state.preselected_valid = state.pool_records.copy()
-        state.preselected_surrogates = state.surrogate_records_all.copy()
+        state.preselected_surrogates = (
+            surrogate_df.to_dict(orient="records")
+            if census_preselect and isinstance(surrogate_df, pd.DataFrame)
+            else state.surrogate_records_all.copy()
+        )
         state.preselect_gate = {
             **state.preselect_gate,
             "selected_source": "full_pool",
@@ -373,8 +421,31 @@ def build_preselected_valid(state: SelectionState) -> SelectionState:
         "dcr_balance_repair_applied": bool(dcr_balance_report.get("applied", False)),
     }
 
+    if census_preselect:
+        state.surrogate_records_all = list(state.preselected_surrogates)
+        state.preselect_gate = {
+            **state.preselect_gate,
+            "census_surrogate_scope": "preselected_only",
+        }
+
     state.effective_preselect_target = len(state.preselected_valid)
     state.effective_keep_k = min(state.desired_keep_k, len(state.preselected_valid))
+    elapsed = float(time.perf_counter() - started)
+    record_pipeline_stage(
+        state.timing_report,
+        "preselected",
+        elapsed,
+        preselected_rows_before=int(len(state.pool_records)),
+        preselected_rows_after=int(len(state.preselected_valid)),
+        preselected_applied=bool(state.preselect_status.get("applied", False)),
+        preselected_mode=state.preselect_status.get("mode"),
+    )
+    get_logger().info(
+        "[pipeline_stages] preselected done rows=%d->%d elapsed=%.2fs",
+        len(state.pool_records),
+        len(state.preselected_valid),
+        elapsed,
+    )
     if state.effective_keep_k <= 0:
         raise RuntimeError("effective_keep_k <= 0. Increase sample size or reduce d_cur_size / keep_k.")
     return state

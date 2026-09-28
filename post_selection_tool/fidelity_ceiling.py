@@ -6,6 +6,7 @@ from .config import progress_enabled
 from .io import records_to_df
 from .logging_utils import get_logger
 from .state import SelectionState
+from .timing import record_pipeline_stage
 from .utility_proxy import (
     apply_utility_source_prior_to_proxy_scores,
     attach_utility_proxy_fields,
@@ -138,6 +139,14 @@ def build_fidelity_ceiling(state: SelectionState) -> SelectionState:
                 "pareto_post_repair",
             ],
         }
+    )
+    record_pipeline_stage(
+        state.timing_report,
+        "score",
+        four_objective_total,
+        score_source="objective_scoring.four_objective_total_seconds",
+        score_complete=bool(exact_recorded),
+        score_candidate_rows=int(len(selection_records)),
     )
     logger.info(
         "[objective_score] utility postprocess done rows=%d elapsed=%.2fs",
