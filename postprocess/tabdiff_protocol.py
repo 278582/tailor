@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from .data_io import load_csv
+from .data_io import load_csv, save_csv
 from .tabdiff_utils import get_tabdiff_paths
 
 
@@ -49,6 +49,20 @@ _TABDIFF_SELECTION_OVERRIDES: dict[str, dict[str, Any]] = {
         ],
         "artifact_root": ROOT_DIR / "artifacts" / "postprocess" / "tabdiff" / "shoppers",
     },
+    "us_census_data_1990": {
+        "logical_name": "us_census_data_1990",
+        "target_column": "poverty",
+        "discrete_numerical_columns": [
+            "dAge",
+            "dHour89",
+            "dWeek89",
+            "dTravtime",
+            "dIncome1",
+            "dRpincome",
+        ],
+        "privacy_sensitive_columns": ["dAge", "iSex", "iMarital", "dPOB", "iCitizen"],
+        "artifact_root": ROOT_DIR / "artifacts" / "postprocess" / "tabdiff" / "us_census_data_1990",
+    },
 }
 
 
@@ -69,6 +83,7 @@ class TabDiffSelectionContext:
     artifact_root: Path
     train_source_path: Path
     test_source_path: Path
+    holdout_source_path: Path
     holdout_fraction: float
     holdout_strategy: str
 
@@ -85,6 +100,7 @@ class TabDiffSelectionContext:
             "artifact_root": str(self.artifact_root),
             "train_source_path": str(self.train_source_path),
             "test_source_path": str(self.test_source_path),
+            "holdout_source_path": str(self.holdout_source_path),
             "holdout_fraction": self.holdout_fraction,
             "holdout_strategy": self.holdout_strategy,
             "train_rows": int(len(self.train_df)),
@@ -93,11 +109,27 @@ class TabDiffSelectionContext:
         }
 
 
+def _repo_synthetic_split_paths(dataset_name: str) -> dict[str, Path] | None:
+    base = ROOT_DIR / "synthetic" / dataset_name
+    train_path = base / "train.csv"
+    hold_path = base / "hold.csv"
+    test_path = base / "test.csv"
+    if train_path.exists() and hold_path.exists() and test_path.exists():
+        return {"train": train_path, "hold": hold_path, "test": test_path}
+    return None
+
+
 def _load_info(dataset_name: str) -> dict[str, Any]:
     paths = get_tabdiff_paths(dataset_name)
-    info_path = paths.data_dir / "info.json"
-    with info_path.open("r", encoding="utf-8") as fp:
-        return json.load(fp)
+    candidates = [
+        paths.data_dir / "info.json",
+        ROOT_DIR / "third_party" / "TabDiff" / "data" / "Info" / f"{dataset_name}.json",
+    ]
+    for info_path in candidates:
+        if info_path.exists():
+            with info_path.open("r", encoding="utf-8") as fp:
+                return json.load(fp)
+    raise FileNotFoundError(f"Cannot resolve TabDiff info.json for dataset={dataset_name}")
 
 
 def _uses_lstripped_column_names(dataset_name: str) -> bool:
@@ -183,12 +215,22 @@ def resolve_tabdiff_selection_context(
     info = normalize_tabdiff_info(dataset_name, _load_info(dataset_name))
     logical_name = str(override.get("logical_name", dataset_name))
 
-    synthetic_train_path = paths.synthetic_dir / "real.csv"
-    synthetic_val_path = paths.synthetic_dir / "val.csv"
-    synthetic_test_path = paths.synthetic_dir / "test.csv"
-    train_path = synthetic_train_path if synthetic_train_path.exists() else paths.data_dir / "train.csv"
-    val_path = synthetic_val_path if synthetic_val_path.exists() else paths.data_dir / "val.csv"
-    test_path = synthetic_test_path if synthetic_test_path.exists() else paths.data_dir / "test.csv"
+    repo_splits = _repo_synthetic_split_paths(dataset_name)
+    hold_path: Path | None = None
+    if repo_splits is not None:
+        train_path = repo_splits["train"]
+        hold_path = repo_splits["hold"]
+        test_path = repo_splits["test"]
+        holdout_strategy = "repo_synthetic_train_hold_test"
+    else:
+        synthetic_train_path = paths.synthetic_dir / "real.csv"
+        synthetic_val_path = paths.synthetic_dir / "val.csv"
+        synthetic_test_path = paths.synthetic_dir / "test.csv"
+        train_path = synthetic_train_path if synthetic_train_path.exists() else paths.data_dir / "train.csv"
+        val_path = synthetic_val_path if synthetic_val_path.exists() else paths.data_dir / "val.csv"
+        test_path = synthetic_test_path if synthetic_test_path.exists() else paths.data_dir / "test.csv"
+        hold_path = val_path if val_path.exists() else None
+        holdout_strategy = "val_as_holdout_full_train" if hold_path is not None else "test_as_holdout_full_train"
     if not train_path.exists():
         raise FileNotFoundError(f"Cannot resolve TabDiff train split for dataset={dataset_name}: {train_path}")
     if not test_path.exists():
@@ -202,22 +244,25 @@ def resolve_tabdiff_selection_context(
         dataset_name,
         _normalize_split(load_csv(test_path), info=info),
     )
-    if val_path.exists():
-        val_df = normalize_tabdiff_dataframe_columns(
+    if hold_path is not None and hold_path.exists():
+        holdout_df = normalize_tabdiff_dataframe_columns(
             dataset_name,
-            _normalize_split(load_csv(val_path), info=info),
-        )
-        holdout_df = val_df.reset_index(drop=True)
-        holdout_strategy = "val_as_holdout_full_train"
+            _normalize_split(load_csv(hold_path), info=info),
+        ).reset_index(drop=True)
     else:
         holdout_df = test_df.copy().reset_index(drop=True)
-        holdout_strategy = "test_as_holdout_full_train"
+        hold_path = test_path
 
     # Keep holdout_fraction for CLI/API compatibility; selection now uses full train and a file-backed holdout.
     train_df = train_full_df.reset_index(drop=True)
 
     target_column = _resolve_target_column(dataset_name=dataset_name, info=info, override=override)
-    column_names = [str(name) for name in info.get("column_names", list(train_df.columns))]
+    raw_column_names = info.get("column_names")
+    column_names = (
+        [str(name) for name in raw_column_names]
+        if raw_column_names
+        else [str(name) for name in train_df.columns]
+    )
     target_indices = [int(idx) for idx in info.get("target_col_idx", [])]
     target_columns = [column_names[idx] for idx in target_indices if 0 <= idx < len(column_names)]
     task_type = str(info.get("task_type", "binclass"))
@@ -249,6 +294,40 @@ def resolve_tabdiff_selection_context(
         artifact_root=artifact_root,
         train_source_path=train_path,
         test_source_path=test_path,
+        holdout_source_path=hold_path,
         holdout_fraction=float(holdout_fraction),
         holdout_strategy=holdout_strategy,
     )
+
+
+def canonicalize_repo_synthetic_splits(dataset_name: str) -> dict[str, Any]:
+    context = resolve_tabdiff_selection_context(dataset_name, seed=0)
+    if context.holdout_strategy != "repo_synthetic_train_hold_test":
+        raise ValueError(
+            f"Cannot canonicalize dataset={dataset_name}: expected repo synthetic splits, "
+            f"got holdout_strategy={context.holdout_strategy}"
+        )
+    train_df = _canonicalize_missing_tokens(context.train_df)
+    holdout_df = _canonicalize_missing_tokens(context.holdout_df)
+    test_df = _canonicalize_missing_tokens(context.test_df)
+    save_csv(context.train_source_path, train_df)
+    save_csv(context.holdout_source_path, holdout_df)
+    save_csv(context.test_source_path, test_df)
+    return {
+        "dataset_name": dataset_name,
+        "train_path": str(context.train_source_path),
+        "hold_path": str(context.holdout_source_path),
+        "test_path": str(context.test_source_path),
+        "train_rows": int(len(train_df)),
+        "holdout_rows": int(len(holdout_df)),
+        "test_rows": int(len(test_df)),
+    }
+
+
+def _canonicalize_missing_tokens(df: pd.DataFrame) -> pd.DataFrame:
+    work = df.copy()
+    for column in work.columns:
+        if work[column].dtype == object:
+            stripped = work[column].map(lambda value: value.strip() if isinstance(value, str) else value)
+            work[column] = stripped.replace({"?": pd.NA, "": pd.NA})
+    return work

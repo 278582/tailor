@@ -1733,9 +1733,6 @@ def main() -> None:
     test_df = dataset_ctx.test_df.copy()
     synthetic_df = normalize_tabdiff_dataframe_columns(args.dataset_name, load_csv(synthetic_csv))
     save_csv(input_dir / "synthetic_raw.csv", synthetic_df)
-    save_csv(input_dir / "eval_train.csv", train_df)
-    save_csv(input_dir / "eval_holdout.csv", holdout_df)
-    save_csv(input_dir / "eval_test.csv", test_df)
     save_json(input_dir / "selection_context.json", dataset_ctx.to_manifest())
     overall.update(1)
 
@@ -1805,9 +1802,9 @@ def main() -> None:
         dataset_name=args.dataset_name,
         device=eval_device,
         metric_list=["density", "dcr"],
-        real_data_path=input_dir / "eval_train.csv",
-        test_data_path=input_dir / "eval_test.csv",
-        val_data_path=input_dir / "eval_holdout.csv",
+        real_data_path=dataset_ctx.train_source_path,
+        test_data_path=dataset_ctx.test_source_path,
+        val_data_path=dataset_ctx.holdout_source_path,
     )
     overall.update(1)
 
