@@ -1,0 +1,44 @@
+Return JSON only.
+
+Task: create exactly {{ n_pools | default(1) }} new synthetic pool(s) after current S strategies have stalled.
+
+Hard constraints:
+- Use only listed source_id values from Source profiles.
+- Use at least two distinct source_id values.
+- Multipliers must be positive integers and sum to {{ pool_multiplier }}.
+- Do not repeat existing S strategies, and do not repeat exact pool_units among the new outputs.
+- Prefer a missing distinct-source count from existing S strategies. If existing pools are only 2-source and {{ pool_multiplier }} allows it, include 3-source pools such as 2+1+1 and/or 4-source pools such as 1+1+1+1.
+- If existing S strategies already cover 2-source, 3-source, and 4-source counts, prefer novel 3-source or 4-source exact ratios before adding another 2-source ratio unless the stalled objective clearly requires a focused 2-source repair.
+- When {{ n_pools | default(1) }} is greater than 1, include at least one focused 2-source pool and at least one broader 3-source or 4-source pool whenever possible.
+- Choose the new pool to repair the weakest stalled objective.
+- Metric directions: shape and trend are higher-better.
+- Utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better.
+- DCR balance privacy_reward is higher-better: privacy_reward = 1 - abs(raw_dcr_real_closer_rate - 0.5).
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+- dcr_real/dcr_test quantiles are nearest-neighbor distances; larger distances reduce exact-neighbor risk, while raw DCR balance should stay near 0.5.
+
+Real utility reference:
+{{ real_utility_reference | tojson(indent=2) }}
+
+DCR balance semantics:
+{{ dcr_balance_semantics | tojson(indent=2) }}
+
+Source profiles:
+{{ source_models | tojson(indent=2) }}
+
+Existing S summary:
+{{ search_summary | tojson(indent=2) }}
+
+Output schema:
+{
+  "schema_version": "v2_refine_select_syn_v1",
+  "syn_pools": [
+    {
+      "pool_units": [{"source_id": "tabdiff", "multiplier": 2}, {"source_id": "tabsyn", "multiplier": 1}, {"source_id": "smote", "multiplier": 1}],
+      "family": "shape|trend|privacy|utility|balanced|diverse",
+      "llm_score": 0.0,
+      "reason": "short semantic reason"
+    }
+  ]
+}

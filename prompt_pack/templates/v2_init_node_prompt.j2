@@ -1,0 +1,45 @@
+Return JSON only.
+
+Task: generate exactly {{ n_theta }} initial target-aware theta proposals{% if s_context %} for this S pool{% else %} for this fixed run{% endif %}.
+
+Hard theta constraints:
+- target may appear in col_1ds and col_2ds, but is not required.
+- target must NOT appear in col_ps.
+- col_u must be exactly one non-target feature.
+- Use only listed schema columns.
+- Respect theta_size_bounds.
+- Proposals should differ in objective focus.
+- Metric directions: shape and trend are higher-better.
+- Utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better; DCR balance privacy_reward is higher-better.
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+
+Dataset brief:
+{{ dataset_brief | tojson(indent=2) }}
+
+DCR balance semantics:
+{{ dcr_balance_semantics | tojson(indent=2) }}
+
+Real utility reference:
+{{ real_utility_reference | tojson(indent=2) }}
+
+{% if s_context %}
+S context:
+{{ s_context | tojson(indent=2) }}
+{% endif %}
+
+Seed theta examples:
+{{ seed_theta_examples | tojson(indent=2) }}
+
+Output schema:
+{
+  "schema_version": "v2_init_node_theta_v1",
+  "theta_proposals": [
+    {
+      "client_theta_id": "theta_candidate_1",
+      "theta": {"col_1ds": [], "col_2ds": [], "col_ps": [], "col_u": ""},
+      "focus": "shape|trend|privacy|utility|balanced",
+      "reason": "short semantic reason"
+    }
+  ]
+}

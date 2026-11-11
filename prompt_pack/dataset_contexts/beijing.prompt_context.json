@@ -1,0 +1,361 @@
+{
+  "schema_version": "llm_mcts_dataset_context_v2_compact",
+  "dataset": "beijing",
+  "task_type": "regression",
+  "target_column": "pm2.5",
+  "rows": {
+    "train": 37581,
+    "test": 4176,
+    "val": 0
+  },
+  "columns": {
+    "feature": [
+      "year",
+      "month",
+      "day",
+      "hour",
+      "DEWP",
+      "TEMP",
+      "PRES",
+      "cbwd",
+      "Iws",
+      "Is",
+      "Ir"
+    ],
+    "num": [
+      "DEWP",
+      "TEMP",
+      "PRES",
+      "Iws",
+      "Is",
+      "Ir"
+    ],
+    "cat": [
+      "year",
+      "month",
+      "day",
+      "hour",
+      "cbwd"
+    ],
+    "discrete_num": [],
+    "privacy_configured": [
+      "year",
+      "month",
+      "day",
+      "hour",
+      "DEWP"
+    ],
+    "privacy_domain": [
+      "TEMP",
+      "PRES",
+      "Iws",
+      "cbwd"
+    ]
+  },
+  "target_summary": {
+    "type": "continuous_regression",
+    "utility_notes": [
+      "preserve PM2.5 regression signal without using target pm2.5 in theta",
+      "DEWP, TEMP, PRES, Iws, hour, month, and cbwd are the strongest utility-side feature candidates",
+      "PM2.5 is right-skewed; high-pollution episodes depend on seasonal, meteorological, and wind-regime structure",
+      "utility evaluation metric in the existing pipeline is RMSE (lower is better); describe utility qualitatively rather than claim new experiment results"
+    ]
+  },
+  "theta_guidance": {
+    "shape_priority": [
+      "DEWP",
+      "TEMP",
+      "PRES",
+      "Iws",
+      "Is",
+      "Ir",
+      "hour",
+      "month",
+      "cbwd",
+      "year",
+      "day"
+    ],
+    "trend_priority": [
+      "DEWP",
+      "TEMP",
+      "PRES",
+      "Iws",
+      "cbwd",
+      "hour",
+      "month",
+      "year",
+      "Is",
+      "Ir",
+      "day"
+    ],
+    "privacy_priority": [
+      "year",
+      "month",
+      "day",
+      "hour",
+      "DEWP",
+      "Iws",
+      "TEMP",
+      "PRES",
+      "cbwd"
+    ],
+    "utility_priority": [
+      "DEWP",
+      "TEMP",
+      "PRES",
+      "Iws",
+      "hour",
+      "month",
+      "cbwd",
+      "year",
+      "Is",
+      "Ir"
+    ]
+  },
+  "pair_priors": [
+    [
+      "DEWP",
+      "TEMP",
+      "dew point and temperature jointly encode humidity and air-mass conditions linked to PM2.5"
+    ],
+    [
+      "TEMP",
+      "PRES",
+      "temperature-pressure structure reflects seasonal and synoptic weather regimes"
+    ],
+    [
+      "cbwd",
+      "Iws",
+      "wind direction and cumulative wind speed jointly control pollutant dispersion"
+    ],
+    [
+      "hour",
+      "TEMP",
+      "diurnal temperature cycles interact with hourly pollution patterns"
+    ],
+    [
+      "month",
+      "TEMP",
+      "seasonality drives temperature distribution and PM2.5 regime shifts"
+    ],
+    [
+      "month",
+      "DEWP",
+      "seasonality also controls humidity/dew point conditions relevant to pollution episodes"
+    ],
+    [
+      "hour",
+      "Iws",
+      "hourly wind accumulation and boundary-layer cycles affect dispersion"
+    ],
+    [
+      "month",
+      "PRES",
+      "seasonal pressure regimes are important weather anchors"
+    ],
+    [
+      "Is",
+      "Ir",
+      "snow and rain indicators are sparse precipitation features with related zero-inflated behavior"
+    ],
+    [
+      "year",
+      "month",
+      "calendar structure should remain coherent across the multi-year time series"
+    ],
+    [
+      "day",
+      "hour",
+      "exact timestamp granularity can create unique temporal records and should stay coherent"
+    ],
+    [
+      "cbwd",
+      "TEMP",
+      "wind direction and temperature together describe weather regimes"
+    ]
+  ],
+  "risks": {
+    "shape": [
+      "Is and Ir are strongly zero-inflated sparse precipitation variables; synthetic data can easily drop rare nonzero events",
+      "Iws is long-tailed with high extremes; preserving only central mass may miss strong wind episodes",
+      "DEWP, TEMP, and PRES have seasonal distributions that should not be flattened",
+      "cbwd has only four categories but uneven frequencies; wind direction mix should remain plausible"
+    ],
+    "trend": [
+      "DEWP, TEMP, and PRES must remain physically coherent as weather variables",
+      "cbwd and Iws jointly describe wind regime and pollutant dispersion",
+      "hour and month interact with weather variables through diurnal and seasonal cycles",
+      "sparse precipitation variables Is and Ir should remain consistent with weather regimes"
+    ],
+    "privacy": [
+      "exact year/month/day/hour combined with weather can create near-unique records",
+      "Iws and pressure/temperature values can act as quasi-identifiers when paired with exact time",
+      "DEWP is currently configured as privacy-sensitive and should remain prominent in col_ps",
+      "broad privacy scope is useful, but do not include all feature columns because theta validation caps col_ps below full feature count"
+    ],
+    "utility": [
+      "dropping meteorological anchors such as DEWP, TEMP, PRES, or Iws weakens PM2.5 regression utility",
+      "using only calendar columns for utility is too weak; weather and wind columns carry the main regression signal",
+      "overemphasizing sparse Is/Ir as col_u is risky because they are mostly zero",
+      "target pm2.5 must never appear in theta even though it is the regression target"
+    ]
+  },
+  "seed_theta_examples": [
+    {
+      "family": "fidelity_heavy",
+      "theta": {
+        "col_1ds": [
+          "pm2.5",
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "Iws",
+          "Is",
+          "Ir"
+        ],
+        "col_2ds": [
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "Iws",
+          "cbwd",
+          "Is",
+          "Ir"
+        ],
+        "col_ps": [
+          "month",
+          "hour",
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "cbwd",
+          "Iws",
+          "Is",
+          "Ir"
+        ],
+        "col_u": "DEWP"
+      },
+      "prior_score": 0.76,
+      "reason": "emphasizes marginal fidelity for DEWP/TEMP/PRES/Iws plus sparse Is/Ir precipitation tails; col_ps omits exact year/day so it is a weather-and-precipitation privacy scope rather than a reordered timestamp scope"
+    },
+    {
+      "family": "trend_heavy",
+      "theta": {
+        "col_1ds": [
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "Iws",
+          "cbwd",
+          "month",
+          "hour"
+        ],
+        "col_2ds": [
+          "pm2.5",
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "Iws",
+          "cbwd",
+          "hour",
+          "month",
+          "year"
+        ],
+        "col_ps": [
+          "year",
+          "month",
+          "hour",
+          "DEWP",
+          "TEMP",
+          "Iws",
+          "PRES",
+          "cbwd",
+          "Is"
+        ],
+        "col_u": "TEMP"
+      },
+      "prior_score": 0.8,
+      "reason": "covers meteorological and wind-regime dependencies from pair priors: DEWP-TEMP, TEMP-PRES, cbwd-Iws, hour-TEMP, month-DEWP, and year-month seasonal coherence"
+    },
+    {
+      "family": "privacy_aware",
+      "theta": {
+        "col_1ds": [
+          "year",
+          "month",
+          "day",
+          "hour",
+          "DEWP",
+          "TEMP",
+          "Iws"
+        ],
+        "col_2ds": [
+          "year",
+          "month",
+          "day",
+          "hour",
+          "DEWP",
+          "TEMP",
+          "Iws",
+          "PRES"
+        ],
+        "col_ps": [
+          "year",
+          "month",
+          "day",
+          "hour",
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "Iws",
+          "cbwd",
+          "Ir"
+        ],
+        "col_u": "Iws"
+      },
+      "prior_score": 0.74,
+      "reason": "privacy-aware seed uses the broadest Beijing col_ps: exact timestamp granularity with DEWP/TEMP/PRES/Iws, cbwd wind regime, and Ir rare-weather signal; it omits Is so the DCR combination remains distinct"
+    },
+    {
+      "family": "utility_aware",
+      "theta": {
+        "col_1ds": [
+          "pm2.5",
+          "DEWP",
+          "Iws",
+          "cbwd",
+          "PRES",
+          "month",
+          "hour",
+          "year",
+          "Ir"
+        ],
+        "col_2ds": [
+          "pm2.5",
+          "DEWP",
+          "TEMP",
+          "PRES",
+          "Iws",
+          "cbwd",
+          "month",
+          "hour",
+          "day"
+        ],
+        "col_ps": [
+          "year",
+          "month",
+          "day",
+          "DEWP",
+          "Iws",
+          "TEMP",
+          "PRES",
+          "Is",
+          "Ir"
+        ],
+        "col_u": "DEWP"
+      },
+      "prior_score": 0.82,
+      "reason": "utility-aware seed follows real regression signal where DEWP, Iws, cbwd, PRES, month, TEMP, and hour dominate PM2.5; col_ps keeps utility/weather anchors but differs from both trend and privacy scopes"
+    }
+  ]
+}

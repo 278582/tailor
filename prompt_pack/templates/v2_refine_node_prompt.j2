@@ -1,0 +1,53 @@
+Return JSON only.
+
+Task: generate exactly {{ n_theta }} child theta proposals by editing current_node.theta{% if s_context %} under the same S pool{% else %} in this fixed run{% endif %}.
+
+Allowed actions:
+add_col_1d, replace_col_1d, add_col_2d, replace_col_2d, add_col_p, replace_col_p, replace_col_u
+
+Hard theta constraints:
+- Actions must transform current_node.theta into output theta.
+- target may appear in col_1ds and col_2ds, but is not required.
+- target must NOT appear in col_ps.
+- col_u must be exactly one non-target feature.
+- Use only listed schema columns.
+- Avoid duplicating current, parent, sibling, or global-best theta.
+- Action format must be strict: add actions use {"type": "add_*", "new": "<feature>"}; replace actions use {"type": "replace_*", "old": "<feature>", "new": "<feature>"}.
+- Do not include column, null, empty, or extra fields in actions.
+- Metric directions: shape and trend are higher-better.
+- Utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better; DCR balance privacy_reward is higher-better.
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+
+Dataset brief:
+{{ dataset_brief | tojson(indent=2) }}
+
+DCR balance semantics:
+{{ dcr_balance_semantics | tojson(indent=2) }}
+
+Real utility reference:
+{{ real_utility_reference | tojson(indent=2) }}
+
+{% if s_context %}
+S context:
+{{ s_context | tojson(indent=2) }}
+{% endif %}
+
+Current node:
+{{ current_node | tojson(indent=2) }}
+
+Reference nodes:
+{{ reference_nodes | tojson(indent=2) }}
+
+Output schema:
+{
+  "schema_version": "v2_refine_node_theta_v1",
+  "theta_proposals": [
+    {
+      "actions": [{"type": "replace_col_1d", "old": "age", "new": "capital.gain"}],
+      "theta": {"col_1ds": [], "col_2ds": [], "col_ps": [], "col_u": ""},
+      "focus": "shape|trend|privacy|utility|balanced",
+      "reason": "short semantic reason"
+    }
+  ]
+}

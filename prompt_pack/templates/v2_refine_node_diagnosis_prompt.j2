@@ -1,0 +1,50 @@
+Return JSON only.
+
+Task: diagnose newly evaluated child theta nodes{% if s_context %} under the same S pool{% else %} in this fixed run{% endif %}.
+
+Rules:
+- Do not propose edits.
+- Reference nodes are context only; they contain at most the best-reward and best-LLM-score nodes outside theta_batch. Diagnose only theta_batch.
+- Every input node_id in theta_batch must appear exactly once.
+- Output llm_score is in [0, 1] and reflects future search value.
+- State whether edits repaired the intended weakness or caused collateral loss.
+- Metric directions: shape and trend are higher-better.
+- Utility metrics: utility_exact_overall and real-profile test_score are raw metric values (roc_auc higher-better, RMSE lower-better); metric_reward_score / metric_reward are normalized higher-better reward values.
+- DCR semantics: raw_dcr_real_closer_rate is best near 0.5 and is not higher-better or lower-better.
+- DCR balance privacy_reward is higher-better: privacy_reward = 1 - abs(raw_dcr_real_closer_rate - 0.5).
+- Treat raw_dcr_real_closer_rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+- dcr_real/dcr_test quantiles are nearest-neighbor distances; larger distances reduce exact-neighbor risk, but do not call raw DCR "low" or "high" as a monotonic score.
+
+Real utility reference:
+{{ real_utility_reference | tojson(indent=2) }}
+
+DCR balance semantics:
+{{ dcr_balance_semantics | tojson(indent=2) }}
+
+{% if s_context %}
+S context:
+{{ s_context | tojson(indent=2) }}
+{% endif %}
+
+Reference nodes:
+{{ reference_nodes | tojson(indent=2) }}
+
+Theta batch:
+{{ theta_batch | tojson(indent=2) }}
+
+Output schema:
+{
+  "schema_version": "v2_refine_node_diagnosis_v1",
+  "batch_summary": "short batch diagnosis",
+  {% if s_context %}
+  "s_semantic_summary": "short S diagnosis",
+  {% endif %}
+  "theta_diagnoses": [
+    {
+      "node_id": "n_000010",
+      "semantic_summary": "short theta diagnosis",
+      "llm_score": 0.0,
+      "score_reason": "short reason"
+    }
+  ]
+}

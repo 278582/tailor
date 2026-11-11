@@ -1,0 +1,21 @@
+Return JSON only.
+
+Task: summarize the real-data utility profile for tabular post-selection.
+
+Dataset brief:
+{{ dataset_brief | tojson(indent=2) }}
+
+Real utility profile:
+{{ real_utility_profile | tojson(indent=2) }}
+
+Rules:
+- Summarize the utility signal using the configured utility evaluator feature ranking and target context.
+- Utility metrics: real-profile test_score is a raw metric value (roc_auc higher-better, RMSE lower-better); normalized utility reward fields are higher-better.
+- Keep the summary semantic and compact.
+- Do not propose theta edits.
+
+Output schema:
+{
+  "schema_version": "v2_real_utility_profile_summary_v1",
+  "semantic_summary": "one compact utility diagnosis"
+}

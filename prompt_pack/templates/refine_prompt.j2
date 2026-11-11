@@ -1,0 +1,68 @@
+You refine one StrategyTheta for theta-guided Pareto postprocessing of synthetic tabular data.
+
+Return JSON only. Return exactly {{ n_expand }} child proposals. Each child must apply 1-6 small edits to current_state.theta, produce the resulting theta, and assign a joint prior_score in [0, 1].
+
+# 1. Dataset Brief
+
+{{ dataset_brief | tojson(indent=2) }}
+
+# 2. Current State
+
+{{ current_state | tojson(indent=2) }}
+
+# 3. Feedback To Fix
+
+{{ feedback_to_fix | tojson(indent=2) }}
+
+# 4. Diversity Context
+
+{{ diversity_context | tojson(indent=2) }}
+
+# 5. Constraints
+
+{{ constraints | tojson(indent=2) }}
+
+Hard constraints:
+- Use only dataset_brief.columns.feature names verbatim; never use dataset_brief.target_column.
+- Add actions use {"type": "add_col_1d", "new": "<feature>"} with the matching add_col_* type.
+- Replace actions use {"type": "replace_col_1d", "old": "<existing feature>", "new": "<feature>"} with the matching replace_col_* type.
+- Do not use remove_* or add_col_u; use replace_col_u for col_u changes.
+- Do not output no-op actions: add only absent columns, and replace only columns currently present in that scope.
+- Each proposal's actions must transform current_state.theta into its theta when applied in order.
+- Avoid duplicating current_state.theta, diversity_context.siblings, and diversity_context.archive.
+
+Metric directions:
+- shape and trend are higher-better.
+- utility metrics: utility_exact_overall/test_score are raw metric values when present (roc_auc higher-better, RMSE lower-better); normalized utility reward fields are higher-better.
+- raw DCR real-closer rate is best near 0.5 and is not higher-better or lower-better; DCR balance privacy_reward is higher-better.
+- Treat raw DCR real-closer rate and privacy_reward as one DCR balance signal; do not describe them as separate DCR changes.
+
+Edit policy:
+- For shape weakness, add a weak shape column only if col_1ds is below its hard maximum; otherwise replace the least useful current col_1ds column.
+- For trend weakness, add or replace anchor columns in col_2ds using feedback_to_fix.trend_weak_pairs and {{ "dataset_brief.pair_priors" if dataset_brief.pair_priors is defined else "available feature columns" }}.
+- For privacy/DCR weakness, prefer adding privacy_configured, privacy_domain, or risk-linked feature columns until col_ps is near the upper half of its target range.
+- For utility weakness, use replace_col_u with a high-priority utility feature.
+- Spread fixes across children so MCTS can isolate which edit helped.
+
+Prior score calibration:
+- 0.85-1.00: strong targeted improvement with low collateral risk.
+- 0.65-0.84: useful targeted improvement.
+- 0.45-0.64: plausible but generic or risky.
+- 0.20-0.44: weak, redundant, or over-correcting.
+- 0.00-0.19: invalid or inconsistent actions/theta.
+
+Output JSON schema:
+{
+  "proposals": [
+    {
+      "actions": [
+        {"type": "replace_col_u", "old": "<feature>", "new": "<feature>"}
+      ],
+      "theta": {"col_1ds": [], "col_2ds": [], "col_ps": [], "col_u": ""},
+      "prior_score": 0.0,
+      "reason": "short rationale linking edits to feedback, priorities, and risk"
+    }
+  ]
+}
+
+Each proposal's actions must transform current_state.theta into its theta when applied in order.
