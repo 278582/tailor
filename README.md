@@ -131,8 +131,8 @@ Random Greedy/MCTS use their `--sample-root`, `--reference-split-dir`,
 ```bash
 python -m MIA.cli \
   --train-csv synthetic/adult/train.csv \
-  --control-csv synthetic/adult/hold.csv \
-  --reference-csv synthetic/adult/test.csv \
+  --control-csv synthetic/adult/test.csv \
+  --reference-csv synthetic/adult/hold.csv \
   --synthetic-csv outputs/adult/tabdiff/demo/versions/selection_pareto.csv \
   --selection-name tailor --out-dir outputs/mia/adult/tailor \
   --seed 20260420 --density-k 5 --max-attribute-columns 20
